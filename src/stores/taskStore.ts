@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { loadWorkspaceTasks } from "../commands";
+import { loadTasks } from "../commands";
 import type { TaskSpec } from "../commands";
 import { needsActiveFile, resolveTaskCommand } from "../utils/taskVariables";
 import { useEditorStore } from "./editorStore";
@@ -65,18 +65,17 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   refresh: async () => {
     set({ loading: true });
     try {
-      const tasks = await loadWorkspaceTasks();
+      const tasks = await loadTasks();
       set({ tasks: tasks ?? [], tasksError: null, loading: false });
     } catch (e) {
       set({ tasks: [], tasksError: String(e), loading: false });
     }
   },
 
+  // Tasks are a global setting, so only the run-time state is reset for a new
+  // workspace; the task list itself is kept.
   reset: () => {
     set({
-      tasks: [],
-      tasksError: null,
-      loading: false,
       taskCenterOpen: false,
       taskTerminalId: null,
       taskStatus: "idle",

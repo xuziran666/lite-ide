@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// One configured task from `.lite-ide/tasks.json`.
+/// One configured task from the global `tasks.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSpec {
     pub name: String,
@@ -13,7 +13,7 @@ struct TasksFile {
     tasks: Vec<TaskSpec>,
 }
 
-/// Parse `.lite-ide/tasks.json` contents. A structurally wrong value (invalid
+/// Parse global `tasks.json` contents. A structurally wrong value (invalid
 /// JSON, a non-object root, or a task missing `name` or `command`) surfaces as
 /// a UI-readable error instead of crashing.
 pub fn parse_tasks(text: &str) -> Result<Vec<TaskSpec>, String> {

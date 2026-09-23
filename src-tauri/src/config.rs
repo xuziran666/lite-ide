@@ -62,9 +62,13 @@ fn parse_user_config(text: &str) -> UserConfig {
     }
 }
 
+/// The directory holding global user configuration (never created on read).
+pub fn app_config_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_config_dir().ok()
+}
+
 fn user_config_path(app: &AppHandle) -> Option<PathBuf> {
-    let dir = app.path().app_config_dir().ok()?;
-    Some(dir.join(USER_CONFIG_FILE))
+    Some(app_config_dir(app)?.join(USER_CONFIG_FILE))
 }
 
 /// Load the user configuration. A missing file yields the defaults without a

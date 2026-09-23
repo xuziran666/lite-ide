@@ -78,11 +78,12 @@ export interface TaskSpec {
 }
 
 /**
- * Tasks defined in `.lite-ide/tasks.json`, or null when there is no workspace
- * or no task file. Errors are surfaced by the backend as rejected promises.
+ * Tasks defined in the global `tasks.json` (the app config directory, next to
+ * `user.json`), or null when the file does not exist. Errors are surfaced by
+ * the backend as rejected promises.
  */
-export function loadWorkspaceTasks(): Promise<TaskSpec[] | null> {
-  return invoke<TaskSpec[] | null>("load_workspace_tasks");
+export function loadTasks(): Promise<TaskSpec[] | null> {
+  return invoke<TaskSpec[] | null>("load_tasks");
 }
 
 export interface UserConfig {

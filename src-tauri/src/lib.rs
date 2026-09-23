@@ -32,7 +32,7 @@ pub fn run() {
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
             commands::terminal::terminal_kill_all,
-            commands::tasks::load_workspace_tasks,
+            commands::tasks::load_tasks,
             commands::tasks::get_user_config,
         ])
         .build(tauri::generate_context!())

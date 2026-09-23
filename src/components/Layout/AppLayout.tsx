@@ -165,12 +165,16 @@ function AppLayout() {
     setTerminalCollapsed(true);
   }, [workspacePath]);
 
-  // Tasks live entirely in the workspace: reset the task store and reload the
-  // task list whenever the workspace changes.
+  // Tasks are global: reset only the task run-time state on a workspace change
+  // (the task terminal is killed when switching), keep the task list as-is.
   useEffect(() => {
     useTaskStore.getState().reset();
-    if (workspacePath) void useTaskStore.getState().refresh();
   }, [workspacePath]);
+
+  // Load the global task list once at startup.
+  useEffect(() => {
+    void useTaskStore.getState().refresh();
+  }, []);
 
   // Load the user configuration (keybindings) once. Defaults apply until then.
   useEffect(() => {

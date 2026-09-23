@@ -1,26 +1,23 @@
 use std::fs;
 
-use tauri::State;
+use tauri::AppHandle;
 
-use crate::config::UserConfig;
+use crate::config::{app_config_dir, UserConfig};
 use crate::error::io_error;
-use crate::state::AppState;
 use crate::tasks::{parse_tasks, TaskSpec};
 
-/// Relative location of the workspace task list.
-const TASKS_FILE: &str = ".lite-ide/tasks.json";
+/// File name of the global task list, stored next to `user.json`.
+const TASKS_FILE: &str = "tasks.json";
 
-/// Load `.lite-ide/tasks.json` for the current workspace. Returns `None` when
-/// there is no workspace or no task file, and a readable error when the file is
-/// invalid JSON or its shape is wrong.
+/// Load the global `tasks.json` from the app config directory. Returns `None`
+/// when the file does not exist, and a readable error when the file is invalid
+/// JSON or its shape is wrong.
 #[tauri::command]
-pub fn load_workspace_tasks(
-    state: State<'_, AppState>,
-) -> Result<Option<Vec<TaskSpec>>, String> {
-    let Some(workspace) = state.workspace()? else {
+pub fn load_tasks(app: AppHandle) -> Result<Option<Vec<TaskSpec>>, String> {
+    let Some(dir) = app_config_dir(&app) else {
         return Ok(None);
     };
-    let path = workspace.join(TASKS_FILE);
+    let path = dir.join(TASKS_FILE);
     if !path.is_file() {
         return Ok(None);
     }
