@@ -77,6 +77,30 @@ body,
   border-left: 1px solid #3c3c3c;
 }
 
+.top-bar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #9d9d9d;
+  cursor: pointer;
+}
+
+.top-bar-button:hover {
+  background-color: #3a3d41;
+  color: #ffffff;
+}
+
+.top-bar-button.active,
+.top-bar-button.active:hover {
+  color: #ffffff;
+}
+
 .app-body {
   flex: 1;
   min-height: 0;
@@ -130,6 +154,22 @@ body,
   min-height: 0;
   display: flex;
   flex-direction: row;
+  min-width: 0;
+}
+
+/* Right (secondary) sidebar: spans the full height next to Editor + Terminal. */
+.right-sidebar-wrap {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #3c3c3c;
+  background-color: #1e1e1e;
+}
+
+.right-sidebar {
+  flex: 1;
+  min-height: 0;
   min-width: 0;
 }
 

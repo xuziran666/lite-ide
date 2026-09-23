@@ -18,8 +18,11 @@ import { useTerminalStore } from "../../stores/terminalStore";
 const MIN_TREE_WIDTH = 180;
 const MAX_TREE_WIDTH = 500;
 const MIN_TERMINAL_HEIGHT = 120;
+const MIN_RIGHT_SIDEBAR_WIDTH = 200;
+const MAX_RIGHT_SIDEBAR_WIDTH = 500;
 const DEFAULT_TREE_WIDTH = 240;
 const DEFAULT_TERMINAL_HEIGHT = 200;
+const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -63,6 +66,14 @@ function AppLayout() {
   );
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [terminalCollapsed, setTerminalCollapsed] = useState(true);
+  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(true);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
+    clamp(
+      DEFAULT_RIGHT_SIDEBAR_WIDTH,
+      MIN_RIGHT_SIDEBAR_WIDTH,
+      MAX_RIGHT_SIDEBAR_WIDTH,
+    ),
+  );
   const [closingDirtyNames, setClosingDirtyNames] = useState<string[] | null>(null);
   const [savingAll, setSavingAll] = useState(false);
 
@@ -152,6 +163,9 @@ function AppLayout() {
     const onResize = () => {
       setFileTreeWidth((w) => clamp(w, MIN_TREE_WIDTH, MAX_TREE_WIDTH));
       setTerminalHeight((h) => clamp(h, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
+      setRightSidebarWidth((w) =>
+        clamp(w, MIN_RIGHT_SIDEBAR_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH),
+      );
     };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -218,6 +232,14 @@ function AppLayout() {
     setTerminalHeight((h) => clamp(h - delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
   }, []);
 
+  // The splitter sits between the center area and the right sidebar; dragging
+  // it right narrows the sidebar, so the delta is subtracted.
+  const handleRightSidebarDrag = useCallback((delta: number) => {
+    setRightSidebarWidth((w) =>
+      clamp(w - delta, MIN_RIGHT_SIDEBAR_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH),
+    );
+  }, []);
+
   const collapseExplorer = useCallback(() => setExplorerCollapsed(true), []);
   const expandExplorer = useCallback(() => setExplorerCollapsed(false), []);
   const toggleExplorer = useCallback(
@@ -226,6 +248,10 @@ function AppLayout() {
   );
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
+  const toggleRightSidebar = useCallback(
+    () => setRightSidebarCollapsed((value) => !value),
+    [],
+  );
 
   const saveAllAndClose = useCallback(async () => {
     setSavingAll(true);
@@ -241,7 +267,10 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
-      <TopBar />
+      <TopBar
+        secondarySidebarVisible={!rightSidebarCollapsed}
+        onToggleSecondarySidebar={toggleRightSidebar}
+      />
       <div className="app-body">
         <ActivityBar
           explorerVisible={!explorerCollapsed}
@@ -295,6 +324,14 @@ function AppLayout() {
             </button>
           )}
         </div>
+        {!rightSidebarCollapsed && (
+          <>
+            <Splitter orientation="vertical" onDrag={handleRightSidebarDrag} />
+            <div className="right-sidebar-wrap" style={{ width: rightSidebarWidth }}>
+              <div className="right-sidebar" />
+            </div>
+          </>
+        )}
       </div>
       <StatusBar />
 
