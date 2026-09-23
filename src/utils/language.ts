@@ -6,7 +6,8 @@ export function basename(path: string): string {
 export function dirname(path: string): string {
   const parts = path.split(/[\\/]/);
   parts.pop();
-  const out = parts.join("/");
+  const sep = path.includes("\\") ? "\\" : "/";
+  const out = parts.join(sep);
   return out || path;
 }
 
