@@ -5,6 +5,8 @@ import FileTree from "../FileTree/FileTree";
 import Tabs from "../Editor/Tabs";
 import Editor from "../Editor/Editor";
 import TerminalPane from "../Terminal/Terminal";
+import TopBar from "./TopBar";
+import ActivityBar from "./ActivityBar";
 import StatusBar from "./StatusBar";
 import CloseConfirmDialog from "./CloseConfirmDialog";
 import Splitter from "../Splitter";
@@ -59,7 +61,7 @@ function AppLayout() {
   const [terminalHeight, setTerminalHeight] = useState(() =>
     clamp(DEFAULT_TERMINAL_HEIGHT, MIN_TERMINAL_HEIGHT, terminalMaxHeight()),
   );
-  const [fileTreeCollapsed, setFileTreeCollapsed] = useState(false);
+  const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [terminalCollapsed, setTerminalCollapsed] = useState(true);
   const [closingDirtyNames, setClosingDirtyNames] = useState<string[] | null>(null);
   const [savingAll, setSavingAll] = useState(false);
@@ -163,7 +165,8 @@ function AppLayout() {
 
       if (!e.shiftKey && key === "b") {
         e.preventDefault();
-        setFileTreeCollapsed((value) => !value);
+        // Toggle the Explorer panel only; the Activity Bar stays visible.
+        setExplorerCollapsed((value) => !value);
         return;
       }
       if (e.code === "Backquote" && e.shiftKey) {
@@ -215,8 +218,12 @@ function AppLayout() {
     setTerminalHeight((h) => clamp(h - delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
   }, []);
 
-  const collapseFileTree = useCallback(() => setFileTreeCollapsed(true), []);
-  const expandFileTree = useCallback(() => setFileTreeCollapsed(false), []);
+  const collapseExplorer = useCallback(() => setExplorerCollapsed(true), []);
+  const expandExplorer = useCallback(() => setExplorerCollapsed(false), []);
+  const toggleExplorer = useCallback(
+    () => setExplorerCollapsed((value) => !value),
+    [],
+  );
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
 
@@ -234,49 +241,62 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
-      {!fileTreeCollapsed && (
-        <>
-          <div className="file-tree-wrap" style={{ width: fileTreeWidth }}>
-            <FileTree onCollapse={collapseFileTree} />
+      <TopBar />
+      <div className="app-body">
+        <ActivityBar
+          explorerVisible={!explorerCollapsed}
+          onToggleExplorer={toggleExplorer}
+        />
+        <div className="app-center">
+          <div className="workbench">
+            {!explorerCollapsed && (
+              <>
+                <div className="file-tree-wrap" style={{ width: fileTreeWidth }}>
+                  <FileTree onCollapse={collapseExplorer} />
+                </div>
+                <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
+              </>
+            )}
+            <div
+              className={
+                explorerCollapsed ? "main-area file-tree-collapsed" : "main-area"
+              }
+            >
+              {explorerCollapsed && (
+                <button
+                  type="button"
+                  className="rail-expand-btn floating"
+                  title="展开资源管理器"
+                  onClick={expandExplorer}
+                >
+                  »
+                </button>
+              )}
+              <Tabs />
+              <Editor />
+            </div>
           </div>
-          <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
-        </>
-      )}
-      <div
-        className={fileTreeCollapsed ? "main-area file-tree-collapsed" : "main-area"}
-      >
-        {fileTreeCollapsed && (
-          <button
-            type="button"
-            className="rail-expand-btn floating"
-            title="展开文件树"
-            onClick={expandFileTree}
+          {!terminalCollapsed && (
+            <Splitter orientation="horizontal" onDrag={handleTerminalDrag} />
+          )}
+          <div
+            className={terminalCollapsed ? "terminal-wrap collapsed" : "terminal-wrap"}
+            style={{ height: terminalCollapsed ? 0 : terminalHeight }}
           >
-            »
-          </button>
-        )}
-        <Tabs />
-        <Editor />
-        {!terminalCollapsed && (
-          <Splitter orientation="horizontal" onDrag={handleTerminalDrag} />
-        )}
-        <div
-          className={terminalCollapsed ? "terminal-wrap collapsed" : "terminal-wrap"}
-          style={{ height: terminalCollapsed ? 0 : terminalHeight }}
-        >
-          <TerminalPane onCollapse={collapseTerminal} />
+            <TerminalPane onCollapse={collapseTerminal} />
+          </div>
+          {terminalCollapsed && (
+            <button
+              type="button"
+              className="terminal-reopen-bar"
+              onClick={expandTerminal}
+            >
+              ▲ 展开终端
+            </button>
+          )}
         </div>
-        {terminalCollapsed && (
-          <button
-            type="button"
-            className="terminal-reopen-bar"
-            onClick={expandTerminal}
-          >
-            ▲ 展开终端
-          </button>
-        )}
-        <StatusBar />
       </div>
+      <StatusBar />
 
       {closingDirtyNames && (
         <CloseConfirmDialog
