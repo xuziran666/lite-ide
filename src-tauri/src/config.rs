@@ -17,6 +17,8 @@ const KEYBINDING_DEFAULTS: &[(&str, &str)] = &[
     ("nextEditorTab", "Ctrl+Tab"),
     ("previousEditorTab", "Ctrl+Shift+Tab"),
     ("openTaskCenter", "Ctrl+Ctrl"),
+    ("quickOpen", "Ctrl+P"),
+    ("globalSearch", "Ctrl+Shift+F"),
 ];
 
 const USER_CONFIG_FILE: &str = "user.json";
@@ -302,11 +304,16 @@ mod tests {
     #[test]
     fn defaults_cover_every_action() {
         let map = defaults();
-        assert_eq!(map.len(), 8);
+        assert_eq!(map.len(), 10);
         assert_eq!(map.get("toggleExplorer").map(String::as_str), Some("Ctrl+B"));
         assert_eq!(
             map.get("openTaskCenter").map(String::as_str),
             Some("Ctrl+Ctrl")
+        );
+        assert_eq!(map.get("quickOpen").map(String::as_str), Some("Ctrl+P"));
+        assert_eq!(
+            map.get("globalSearch").map(String::as_str),
+            Some("Ctrl+Shift+F")
         );
     }
 
@@ -408,7 +415,7 @@ mod tests {
     fn empty_user_json_falls_back_with_notice() {
         let cfg = parse_user_config("");
         assert!(cfg.notice.is_some());
-        assert_eq!(cfg.keybindings.len(), 8);
+        assert_eq!(cfg.keybindings.len(), 10);
     }
 
     #[test]

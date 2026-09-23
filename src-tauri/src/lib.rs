@@ -28,6 +28,8 @@ pub fn run() {
             commands::fs::set_workspace,
             commands::fs::get_workspace,
             commands::fs::get_last_workspace,
+            commands::search::list_workspace_files,
+            commands::search::search_workspace,
             commands::terminal::terminal_spawn,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

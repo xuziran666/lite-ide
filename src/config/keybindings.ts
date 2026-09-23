@@ -8,6 +8,8 @@ export const KEYBINDING_ACTIONS = [
   "nextEditorTab",
   "previousEditorTab",
   "openTaskCenter",
+  "quickOpen",
+  "globalSearch",
 ] as const;
 
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
@@ -24,6 +26,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   nextEditorTab: "Ctrl+Tab",
   previousEditorTab: "Ctrl+Shift+Tab",
   openTaskCenter: "Ctrl+Ctrl",
+  quickOpen: "Ctrl+P",
+  globalSearch: "Ctrl+Shift+F",
 };
 
 /**
@@ -106,6 +110,8 @@ export const KEYBINDING_LABELS: Record<KeybindingAction, string> = {
   nextEditorTab: "Next Editor Tab",
   previousEditorTab: "Previous Editor Tab",
   openTaskCenter: "Open Task Center",
+  quickOpen: "Quick Open",
+  globalSearch: "Global Search",
 };
 
 /**

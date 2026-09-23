@@ -4,6 +4,7 @@ import type { TreeNode as TreeNodeType } from "../../types";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { useSearchStore } from "../../stores/searchStore";
 import TreeNode from "./TreeNode";
 import FolderIcon from "./FolderIcon";
 import ContextMenu, { type ContextMenuAction } from "./ContextMenu";
@@ -120,6 +121,32 @@ function FileTree({ onCollapse }: FileTreeProps) {
           {rootName}
         </span>
         <div className="file-tree-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="全局搜索（Ctrl+Shift+F）"
+            onClick={() => useSearchStore.getState().openRightSidebar("search")}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+              <circle
+                cx="6.5"
+                cy="6.5"
+                r="4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <line
+                x1="10"
+                y1="10"
+                x2="14"
+                y2="14"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
           <button
             type="button"
             className="icon-btn"

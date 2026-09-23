@@ -146,3 +146,40 @@ export function readGlobalFile(name: string): Promise<string | null> {
 export function writeGlobalFile(name: string, content: string): Promise<void> {
   return invoke<void>("write_global_file", { name, content });
 }
+
+/**
+ * Every file in the workspace as a workspace-relative path with `/`
+ * separators. Hidden directories (`.git`, `target`, `dist`, `build`, `.cache`)
+ * are skipped; `node_modules` is included. Feeds Quick Open.
+ */
+export function listWorkspaceFiles(): Promise<string[]> {
+  return invoke<string[]>("list_workspace_files");
+}
+
+export interface SearchMatch {
+  /** Workspace-relative path, always using `/` separators. */
+  path: string;
+  /** 1-based line number. */
+  line: number;
+  /** 1-based character column of the first match on the line. */
+  column: number;
+  /** The full line, trimmed of surrounding whitespace/newline. */
+  text: string;
+}
+
+export interface SearchOptions {
+  caseSensitive: boolean;
+  useRegex: boolean;
+}
+
+/** Content search across the whole workspace; rejects on an invalid regex. */
+export function searchWorkspace(
+  query: string,
+  options: SearchOptions,
+): Promise<SearchMatch[]> {
+  return invoke<SearchMatch[]>("search_workspace", {
+    query,
+    caseSensitive: options.caseSensitive,
+    useRegex: options.useRegex,
+  });
+}

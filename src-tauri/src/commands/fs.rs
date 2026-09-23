@@ -30,13 +30,22 @@ fn no_workspace_error() -> String {
 }
 
 /// Whether a directory name is hidden from the file tree.
-fn is_hidden_name(name: &str) -> bool {
+pub(crate) fn is_hidden_name(name: &str) -> bool {
     HIDDEN_DIRS.iter().any(|d| *d == name)
 }
 
 /// Whether a directory name is dropped by the file-system watcher.
 fn is_ignored_name(name: &str) -> bool {
     IGNORED_DIRS.iter().any(|d| *d == name)
+}
+
+/// Whether any path component (leaf included) is a directory hidden from the
+/// file tree, so navigation features cannot reach inside `.git` & co.
+pub(crate) fn path_is_hidden(path: &Path) -> bool {
+    path.components()
+        .map(Component::as_os_str)
+        .filter_map(|s| s.to_str())
+        .any(is_hidden_name)
 }
 
 pub(crate) fn path_is_ignored(path: &Path) -> bool {

@@ -18,6 +18,16 @@ export function getModel(path: string): monaco.editor.ITextModel | undefined {
   return tracked.get(norm(path))?.model;
 }
 
+/** Reverse lookup: the normalized path owning a live model, if any. */
+export function pathForModel(
+  model: monaco.editor.ITextModel,
+): string | undefined {
+  for (const [key, entry] of tracked) {
+    if (entry.model === model) return key;
+  }
+  return undefined;
+}
+
 export function getTracked(path: string): Tracked | undefined {
   return tracked.get(norm(path));
 }

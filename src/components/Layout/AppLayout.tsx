@@ -13,11 +13,14 @@ import Splitter from "../Splitter";
 import TaskCenter from "../Tasks/TaskCenter";
 import SettingsView from "../Settings/SettingsView";
 import ToastStack from "../Toast/ToastStack";
+import RightSidebar from "./RightSidebar";
+import QuickOpen from "../Search/QuickOpen";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { useSearchStore } from "../../stores/searchStore";
 import { useConfigStore } from "../../stores/configStore";
 import {
   isDoubleCtrlChord,
@@ -77,7 +80,6 @@ function AppLayout() {
   );
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [terminalCollapsed, setTerminalCollapsed] = useState(true);
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(true);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     clamp(
       DEFAULT_RIGHT_SIDEBAR_WIDTH,
@@ -93,6 +95,7 @@ function AppLayout() {
   const taskRunSeq = useTaskStore((s) => s.taskRunSeq);
   const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
   const settingsOpen = useConfigStore((s) => s.settingsOpen);
+  const rightSidebarOpen = useSearchStore((s) => s.rightSidebarOpen);
 
   // File system events drive both the tree refresh and the editor handling of
   // files that changed outside the app.
@@ -296,6 +299,18 @@ function AppLayout() {
       }
       if (match("previousEditorTab")) {
         switchTabBy(-1, e);
+        return;
+      }
+      if (match("quickOpen")) {
+        if (isTextInputFocused()) return;
+        e.preventDefault();
+        useSearchStore.getState().openQuickOpen();
+        return;
+      }
+      if (match("globalSearch")) {
+        if (isTextInputFocused()) return;
+        e.preventDefault();
+        useSearchStore.getState().openRightSidebar("search");
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -327,7 +342,7 @@ function AppLayout() {
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
   const toggleRightSidebar = useCallback(
-    () => setRightSidebarCollapsed((value) => !value),
+    () => useSearchStore.getState().toggleRightSidebar(),
     [],
   );
 
@@ -345,10 +360,10 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
-      <TopBar
-        secondarySidebarVisible={!rightSidebarCollapsed}
-        onToggleSecondarySidebar={toggleRightSidebar}
-      />
+<TopBar
+          secondarySidebarVisible={rightSidebarOpen}
+          onToggleSecondarySidebar={toggleRightSidebar}
+        />
 <div className="app-body">
           <ActivityBar
             explorerVisible={!explorerCollapsed}
@@ -407,11 +422,13 @@ function AppLayout() {
             </button>
           )}
         </div>
-        {!rightSidebarCollapsed && (
+        {rightSidebarOpen && (
           <>
             <Splitter orientation="vertical" onDrag={handleRightSidebarDrag} />
             <div className="right-sidebar-wrap" style={{ width: rightSidebarWidth }}>
-              <div className="right-sidebar" />
+              <div className="right-sidebar">
+                <RightSidebar />
+              </div>
             </div>
           </>
         )}
@@ -419,6 +436,7 @@ function AppLayout() {
       <StatusBar />
 
       {taskCenterOpen && <TaskCenter />}
+      <QuickOpen />
       <ToastStack />
 
       {closingDirtyNames && (
