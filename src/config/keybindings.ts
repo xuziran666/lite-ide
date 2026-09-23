@@ -95,3 +95,77 @@ export function chordMatches(chord: KeyChord | null, e: KeyboardEvent): boolean 
       return e.key.toLowerCase() === chord.key.toLowerCase();
   }
 }
+
+/** Human-friendly display names for the Settings shortcut list. */
+export const KEYBINDING_LABELS: Record<KeybindingAction, string> = {
+  toggleExplorer: "Toggle Explorer",
+  toggleTerminal: "Toggle Terminal",
+  newTerminal: "New Terminal",
+  closeEditorTab: "Close Editor Tab",
+  restoreClosedTab: "Restore Closed Tab",
+  nextEditorTab: "Next Editor Tab",
+  previousEditorTab: "Previous Editor Tab",
+  openTaskCenter: "Open Task Center",
+};
+
+/**
+ * Build a normalized chord string from a keyboard event. Returns null for pure
+ * modifier presses, which are used to detect the double-Ctrl gesture instead.
+ */
+export function chordFromEvent(e: KeyboardEvent): string | null {
+  if (
+    e.key === "Control" ||
+    e.key === "Shift" ||
+    e.key === "Alt" ||
+    e.key === "Meta"
+  ) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (e.ctrlKey) parts.push("Ctrl");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.altKey) parts.push("Alt");
+  if (e.metaKey) parts.push("Meta");
+
+  let key: string | null = null;
+  if (e.code.startsWith("Key")) {
+    key = e.code.slice(3).toUpperCase();
+  } else if (e.code.startsWith("Digit")) {
+    key = e.code.slice(5);
+  } else if (e.code === "Backquote") {
+    key = "`";
+  } else {
+    switch (e.key) {
+      case "Tab":
+        key = "Tab";
+        break;
+      case "Enter":
+        key = "Enter";
+        break;
+      case "Escape":
+        key = "Escape";
+        break;
+      case " ":
+        key = "Space";
+        break;
+      default:
+        key = e.key.length === 1 ? e.key : e.code;
+    }
+  }
+  if (!key) return null;
+  parts.push(key);
+  return parts.join("+");
+}
+
+/**
+ * Whether a chord is acceptable as a user-recorded shortcut. Ordinary chords
+ * must include Ctrl or Meta and must not include Alt; the special `Ctrl+Ctrl`
+ * double-press is allowed so `openTaskCenter` keeps its default behavior.
+ */
+export function isUsableShortcut(chord: string): boolean {
+  if (isDoubleCtrlChord(chord)) return true;
+  const parsed = parseChord(chord);
+  if (!parsed) return false;
+  return (parsed.ctrl || parsed.meta) && !parsed.alt;
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
 import { useEditorStore } from "../../stores/editorStore";
+import { useConfigStore } from "../../stores/configStore";
 import { getModel } from "../../editor/modelStore";
 
 function Editor() {
@@ -78,10 +79,30 @@ function Editor() {
     editor.setModel(model ?? null);
   }, [activePath]);
 
+  // Hot-apply the editor settings from the Settings page. This only touches
+  // display options; open models, tabs and cursor positions are preserved.
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const apply = () => {
+      const s = useConfigStore.getState();
+      if (!s.loaded) return;
+      editor.updateOptions({
+        fontSize: s.editor.fontSize,
+        tabSize: s.editor.tabSize,
+        wordWrap: s.editor.wordWrap as "off" | "on" | "wordWrapColumn",
+        minimap: { enabled: s.editor.minimap },
+      });
+    };
+    apply();
+    return useConfigStore.subscribe(apply);
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+        if (useConfigStore.getState().settingsOpen) return;
         e.preventDefault();
         void save();
       }

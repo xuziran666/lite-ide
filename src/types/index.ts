@@ -22,6 +22,8 @@ export interface Tab {
   name: string;
   language: string;
   dirty: boolean;
+  /** True for files outside the workspace (e.g. the global tasks.json). */
+  external?: boolean;
 }
 
 /** Cursor and selection state reported by the active Monaco editor. */

@@ -86,12 +86,63 @@ export function loadTasks(): Promise<TaskSpec[] | null> {
   return invoke<TaskSpec[] | null>("load_tasks");
 }
 
+export interface EditorSettings {
+  fontSize: number;
+  tabSize: number;
+  wordWrap: string;
+  minimap: boolean;
+}
+
+export interface TerminalSettings {
+  defaultShell: string;
+}
+
+export interface GeneralSettings {
+  restoreLastWorkspace: boolean;
+  confirmBeforeClose: boolean;
+}
+
 export interface UserConfig {
   keybindings: Record<string, string>;
+  editor: EditorSettings;
+  terminal: TerminalSettings;
+  general: GeneralSettings;
+  configDir: string;
   notice: string | null;
 }
 
-/** The user configuration bundled with the defaults; always resolves. */
+/** The shape the Settings UI writes back: every section is fully filled. */
+export interface UserConfigPatch {
+  keybindings: Record<string, string>;
+  editor: EditorSettings;
+  terminal: TerminalSettings;
+  general: GeneralSettings;
+}
+
+/** The user configuration merged over the built-in defaults; always resolves. */
 export function getUserConfig(): Promise<UserConfig> {
   return invoke<UserConfig>("get_user_config");
+}
+
+/** Persist the full user configuration back to `user.json`. */
+export function setUserConfig(config: UserConfigPatch): Promise<void> {
+  return invoke<void>("set_user_config", { config });
+}
+
+/** Shells installed on this machine, most preferred first. */
+export function getShells(): Promise<string[]> {
+  return invoke<string[]>("get_shells");
+}
+
+/**
+ * Read a global configuration file (e.g. `tasks.json`) from the app config
+ * directory. Resolves null when the file does not exist.
+ */
+export function readGlobalFile(name: string): Promise<string | null> {
+  return invoke<string | null>("read_global_file", { name });
+}
+
+/** Write a global configuration file back to the app config directory. */
+export function writeGlobalFile(name: string, content: string): Promise<void> {
+  return invoke<void>("write_global_file", { name, content });
 }

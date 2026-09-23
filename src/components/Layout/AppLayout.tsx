@@ -11,6 +11,7 @@ import StatusBar from "./StatusBar";
 import CloseConfirmDialog from "./CloseConfirmDialog";
 import Splitter from "../Splitter";
 import TaskCenter from "../Tasks/TaskCenter";
+import SettingsView from "../Settings/SettingsView";
 import ToastStack from "../Toast/ToastStack";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
@@ -91,6 +92,7 @@ function AppLayout() {
   const activePath = useEditorStore((s) => s.activePath);
   const taskRunSeq = useTaskStore((s) => s.taskRunSeq);
   const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
+  const settingsOpen = useConfigStore((s) => s.settingsOpen);
 
   // File system events drive both the tree refresh and the editor handling of
   // files that changed outside the app.
@@ -115,12 +117,14 @@ function AppLayout() {
     };
   }, []);
 
-  // Never let a window close silently discard unsaved edits.
+  // Ask before a window close that would drop unsaved edits, unless the user
+  // turned "Confirm Before Close" off in Settings.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void getCurrentWindow()
       .onCloseRequested((event) => {
+        if (!useConfigStore.getState().general.confirmBeforeClose) return;
         const dirty = useEditorStore
           .getState()
           .openFiles.filter((tab) => tab.dirty);
@@ -176,11 +180,6 @@ function AppLayout() {
     void useTaskStore.getState().refresh();
   }, []);
 
-  // Load the user configuration (keybindings) once. Defaults apply until then.
-  useEffect(() => {
-    void useConfigStore.getState().load();
-  }, []);
-
   // A task run always reveals the terminal panel and focuses the task terminal.
   useEffect(() => {
     if (taskRunSeq === 0) return;
@@ -222,6 +221,8 @@ function AppLayout() {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // The Settings page owns the keyboard while it is open (recorder, focus).
+      if (useConfigStore.getState().settingsOpen) return;
       if (useTaskStore.getState().taskCenterOpen) return;
 
       const keybindings = useConfigStore.getState().keybindings;
@@ -348,40 +349,45 @@ function AppLayout() {
         secondarySidebarVisible={!rightSidebarCollapsed}
         onToggleSecondarySidebar={toggleRightSidebar}
       />
-      <div className="app-body">
-        <ActivityBar
-          explorerVisible={!explorerCollapsed}
-          onToggleExplorer={toggleExplorer}
-        />
-        <div className="app-center">
-          <div className="workbench">
-            {!explorerCollapsed && (
-              <>
-                <div className="file-tree-wrap" style={{ width: fileTreeWidth }}>
-                  <FileTree onCollapse={collapseExplorer} />
-                </div>
-                <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
-              </>
-            )}
-            <div
-              className={
-                explorerCollapsed ? "main-area file-tree-collapsed" : "main-area"
-              }
-            >
-              {explorerCollapsed && (
-                <button
-                  type="button"
-                  className="rail-expand-btn floating"
-                  title="展开资源管理器"
-                  onClick={expandExplorer}
-                >
-                  »
-                </button>
+<div className="app-body">
+          <ActivityBar
+            explorerVisible={!explorerCollapsed}
+            onToggleExplorer={toggleExplorer}
+          />
+          <div
+            className={settingsOpen ? "app-center settings-mode" : "app-center"}
+          >
+            <div className="workbench">
+              {!explorerCollapsed && (
+                <>
+                  <div className="file-tree-wrap" style={{ width: fileTreeWidth }}>
+                    <FileTree onCollapse={collapseExplorer} />
+                  </div>
+                  <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
+                </>
               )}
-              <Tabs />
-              <Editor />
+              <div
+                className={
+                  explorerCollapsed ? "main-area file-tree-collapsed" : "main-area"
+                }
+              >
+                {explorerCollapsed && (
+                  <button
+                    type="button"
+                    className="rail-expand-btn floating"
+                    title="展开资源管理器"
+                    onClick={expandExplorer}
+                  >
+                    »
+                  </button>
+                )}
+                <Tabs />
+                <Editor />
+              </div>
             </div>
-          </div>
+            {/* Settings overlays the editor while the workbench stays mounted
+                so Monaco models, tabs and the file tree keep their state. */}
+            {settingsOpen && <SettingsView />}
           {!terminalCollapsed && (
             <Splitter orientation="horizontal" onDrag={handleTerminalDrag} />
           )}

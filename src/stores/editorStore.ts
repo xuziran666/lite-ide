@@ -1,8 +1,15 @@
 import { create } from "zustand";
 import type { CursorInfo, Tab } from "../types";
-import { listDir, readFile, writeFile } from "../commands";
+import {
+  listDir,
+  readFile,
+  readGlobalFile,
+  writeFile,
+  writeGlobalFile,
+} from "../commands";
 import * as modelStore from "../editor/modelStore";
-import { basename, dirname, languageForPath } from "../utils/language";
+import { useConfigStore } from "./configStore";
+import { basename, dirname, joinPath, languageForPath } from "../utils/language";
 
 /**
  * Tabs being closed in a batch (close others / close right / close all).
@@ -29,6 +36,7 @@ interface EditorStore {
   closedTabs: string[];
   cursor: CursorInfo | null;
   openFile: (path: string) => Promise<void>;
+  openGlobalFile: (name: string, fallbackContent?: string) => Promise<void>;
   setActive: (path: string) => void;
   closeTab: (path: string, record?: boolean) => void;
   closeMany: (
@@ -114,6 +122,54 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
   },
 
+  /// Open a global configuration file (e.g. `tasks.json`) from the app config
+  /// directory. When it does not exist yet, it is opened with the given
+  /// fallback content without being considered dirty.
+  openGlobalFile: async (name, fallbackContent) => {
+    const dir = useConfigStore.getState().configDir;
+    if (!dir) {
+      set({ error: "无法解析配置目录" });
+      return;
+    }
+    const path = joinPath(dir, name);
+    if (get().openFiles.some((t) => t.path === path)) {
+      set({ activePath: path, error: null });
+      return;
+    }
+
+    let content: string;
+    try {
+      content = (await readGlobalFile(name)) ?? fallbackContent ?? "";
+    } catch (e) {
+      set({ error: String(e) });
+      return;
+    }
+
+    if (get().openFiles.some((t) => t.path === path)) {
+      set({ activePath: path, error: null });
+      return;
+    }
+
+    modelStore.createModel(path, content, (dirty) => {
+      get().markDirty(path, dirty);
+    });
+
+    set((s) => ({
+      openFiles: [
+        ...s.openFiles,
+        {
+          path,
+          name,
+          language: languageForPath(name),
+          dirty: false,
+          external: true,
+        },
+      ],
+      activePath: path,
+      error: null,
+    }));
+  },
+
   setActive: (path: string) => {
     set({ activePath: path, error: null });
   },
@@ -178,9 +234,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const tracked = modelStore.getTracked(target);
     if (!tracked) return false;
 
+    const tab = get().openFiles.find((t) => t.path === target);
     const content = tracked.model.getValue();
     try {
-      await writeFile(target, content);
+      if (tab?.external) {
+        await writeGlobalFile(basename(target), content);
+      } else {
+        await writeFile(target, content);
+      }
       modelStore.markSaved(target);
       set((s) => ({
         openFiles: s.openFiles.map((t) =>

@@ -2,6 +2,7 @@ pub mod commands;
 mod config;
 mod error;
 mod session;
+mod shell;
 mod state;
 mod tasks;
 mod terminal;
@@ -32,8 +33,12 @@ pub fn run() {
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
             commands::terminal::terminal_kill_all,
+            commands::terminal::get_shells,
             commands::tasks::load_tasks,
-            commands::tasks::get_user_config,
+            commands::config::get_user_config,
+            commands::config::set_user_config,
+            commands::config::read_global_file,
+            commands::config::write_global_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

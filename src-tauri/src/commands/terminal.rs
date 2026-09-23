@@ -1,36 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, State};
 
 use crate::error::io_error;
 use crate::state::AppState;
 use crate::terminal::TerminalSession;
 
-/// Locate an executable by name on the `PATH`. Returns the first match.
-#[cfg(windows)]
-fn find_executable(name: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
-}
-
-/// The shell to launch for a new terminal session. On Windows prefer
-/// PowerShell 7 (`pwsh.exe`), then Windows PowerShell (`powershell.exe`),
-/// then fall back to `cmd.exe`; on Unix use `$SHELL` then `/bin/sh`.
-fn current_shell() -> String {
-    #[cfg(windows)]
-    {
-        ["pwsh.exe", "powershell.exe", "cmd.exe"]
-            .iter()
-            .find_map(|name| find_executable(name))
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "cmd.exe".to_string())
-    }
-    #[cfg(not(windows))]
-    {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    }
+/// Shells available on this machine that the Settings page lists, in preferred
+/// order. `current_shell()` always yields one of them.
+#[tauri::command]
+pub fn get_shells() -> Result<Vec<String>, String> {
+    Ok(crate::shell::available_shells())
 }
 
 /// Convert an extended-length Windows path (`\\?\`) back to a normal path so
@@ -66,17 +46,21 @@ fn resolve_cwd(state: &AppState) -> Result<PathBuf, String> {
     })
 }
 
-/// Spawn a new shell in a pseudo-terminal with the current shell/cwd. The
+/// Spawn a new shell in a pseudo-terminal with the configured shell/cwd. The
 /// session is registered under the frontend-assigned `id`. A restart of the
 /// same terminal is done by `terminal_kill(id)` followed by another spawn.
+/// The shell is resolved at spawn time so running terminals are never
+/// affected by a later Default Shell change in Settings.
 #[tauri::command]
 pub fn terminal_spawn(
     state: State<'_, AppState>,
+    app: AppHandle,
     id: u64,
     channel: Channel<Vec<u8>>,
 ) -> Result<(), String> {
     let cwd = resolve_cwd(&state)?;
-    let session = TerminalSession::spawn(current_shell(), Some(normalize_cwd(&cwd)), channel)?;
+    let shell = crate::config::configured_shell(&app);
+    let session = TerminalSession::spawn(shell, Some(normalize_cwd(&cwd)), channel)?;
     state.set_terminal(id, session);
     Ok(())
 }
