@@ -68,7 +68,11 @@ pub struct GeneralConfigFile {
 
 /// The resolved config sent to the frontend: defaults merged with `user.json`
 /// overrides, plus an optional notice when the stored file was unreadable.
+/// Serialized with camelCase keys so the frontend sees `configDir`, `fontSize`,
+/// `tabSize`, `wordWrap`, `defaultShell`, `restoreLastWorkspace` and
+/// `confirmBeforeClose`.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserConfig {
     pub keybindings: HashMap<String, String>,
     pub editor: EditorSettings,
@@ -79,6 +83,7 @@ pub struct UserConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorSettings {
     pub font_size: u32,
     pub tab_size: u32,
@@ -98,6 +103,7 @@ impl Default for EditorSettings {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub default_shell: String,
 }
@@ -111,6 +117,7 @@ impl Default for TerminalSettings {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
     pub restore_last_workspace: bool,
     pub confirm_before_close: bool,
@@ -287,7 +294,10 @@ pub fn configured_shell(app: &AppHandle) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{defaults, parse_user_config, sanitize_file, UserConfigFile};
+    use super::{
+        defaults, parse_user_config, sanitize_file, EditorSettings, GeneralSettings,
+        TerminalSettings, UserConfig, UserConfigFile,
+    };
 
     #[test]
     fn defaults_cover_every_action() {
@@ -405,5 +415,40 @@ mod tests {
     fn unknown_actions_are_ignored() {
         let cfg = parse_user_config(r#"{"keybindings":{"no-such-action":"Ctrl+Z"}}"#);
         assert!(!cfg.keybindings.contains_key("no-such-action"));
+    }
+
+    #[test]
+    fn serializes_settings_with_camel_case_keys() {
+        let cfg = UserConfig {
+            keybindings: defaults(),
+            editor: EditorSettings {
+                font_size: 18,
+                tab_size: 4,
+                word_wrap: "on".to_string(),
+                minimap: true,
+            },
+            terminal: TerminalSettings {
+                default_shell: "cmd.exe".to_string(),
+            },
+            general: GeneralSettings {
+                restore_last_workspace: false,
+                confirm_before_close: false,
+            },
+            config_dir: r"C:\Users\test\AppData\Roaming\com.longanl.lite-ide".to_string(),
+            notice: None,
+        };
+        let text = serde_json::to_string(&cfg).unwrap();
+        // The frontend reads camelCase keys; snake_case fields here would be
+        // silently dropped (which broke "打开 tasks.json").
+        assert!(text.contains(r#""configDir":"#), "{text}");
+        assert!(text.contains(r#""fontSize":18"#), "{text}");
+        assert!(text.contains(r#""tabSize":4"#), "{text}");
+        assert!(text.contains(r#""wordWrap":"on""#), "{text}");
+        assert!(text.contains(r#""minimap":true"#), "{text}");
+        assert!(text.contains(r#""defaultShell":"cmd.exe""#), "{text}");
+        assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
+        assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");
+        assert!(!text.contains("config_dir"), "{text}");
+        assert!(!text.contains("font_size"), "{text}");
     }
 }
