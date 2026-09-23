@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useEditorStore } from "../../stores/editorStore";
 import FolderIcon from "./FolderIcon";
 import FileIcon from "./FileIcon";
 
@@ -9,6 +10,7 @@ function FileTree() {
   const loading = useWorkspaceStore((s) => s.loading);
   const error = useWorkspaceStore((s) => s.error);
   const openWorkspace = useWorkspaceStore((s) => s.openWorkspace);
+  const openFile = useEditorStore((s) => s.openFile);
 
   const rootName =
     workspacePath?.split(/[\\/]/).filter(Boolean).pop() || workspacePath || "";
@@ -46,7 +48,13 @@ function FileTree() {
         )}
         <ul className="file-list">
           {entries.map((e) => (
-            <li key={e.path} className="file-item">
+            <li
+              key={e.path}
+              className={`file-item${e.is_dir ? " is-dir" : " is-file"}`}
+              onClick={() => {
+                if (!e.is_dir) void openFile(e.path);
+              }}
+            >
               {e.is_dir ? <FolderIcon /> : <FileIcon />}
               <span className="file-name" title={e.name}>
                 {e.name}

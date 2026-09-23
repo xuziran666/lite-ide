@@ -1,5 +1,6 @@
 import FileTree from "../FileTree/FileTree";
-import EditorPlaceholder from "../Editor/EditorPlaceholder";
+import Tabs from "../Editor/Tabs";
+import Editor from "../Editor/Editor";
 import TerminalPlaceholder from "../Terminal/TerminalPlaceholder";
 
 function AppLayout() {
@@ -7,7 +8,8 @@ function AppLayout() {
     <div className="app-layout">
       <FileTree />
       <div className="main-area">
-        <EditorPlaceholder />
+        <Tabs />
+        <Editor />
         <TerminalPlaceholder />
       </div>
     </div>

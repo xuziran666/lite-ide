@@ -11,6 +11,8 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             commands::fs::list_dir,
+            commands::fs::read_file,
+            commands::fs::write_file,
             commands::fs::set_workspace,
             commands::fs::get_workspace,
         ])
