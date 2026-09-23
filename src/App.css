@@ -33,13 +33,48 @@ body,
 }
 
 /* File tree */
+.file-tree-wrap {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #3c3c3c;
+}
+
 .file-tree {
-  width: 240px;
-  min-width: 160px;
+  width: 100%;
+  min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   background-color: #252526;
+}
+
+.file-tree-rail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #252526;
   border-right: 1px solid #3c3c3c;
+}
+
+.rail-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: #9d9d9d;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 14px;
+}
+
+.rail-expand-btn:hover {
+  background-color: #3a3d41;
+  color: #ffffff;
 }
 
 .file-tree-header {
@@ -206,6 +241,45 @@ body,
   flex-direction: column;
   flex: 1;
   min-width: 0;
+}
+
+/* Splitters */
+.splitter {
+  flex: none;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+
+.splitter-vertical {
+  width: 6px;
+  cursor: col-resize;
+}
+
+.splitter-vertical:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.splitter-horizontal {
+  height: 6px;
+  cursor: row-resize;
+}
+
+.splitter-horizontal:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+body.layout-resizing {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.layout-resizing-vertical {
+  cursor: col-resize;
+}
+
+body.layout-resizing-horizontal {
+  cursor: row-resize;
 }
 
 /* Editor pane */
@@ -434,13 +508,41 @@ body,
   cursor: default;
 }
 
+.terminal-wrap {
+  flex: none;
+  border-top: 1px solid #3c3c3c;
+  overflow: hidden;
+}
+
+.terminal-wrap.collapsed {
+  border-top: none;
+}
+
 .terminal-pane {
   display: flex;
   flex-direction: column;
-  height: 200px;
-  flex: none;
-  border-top: 1px solid #3c3c3c;
+  height: 100%;
   background-color: #1e1e1e;
+}
+
+.terminal-reopen-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 28px;
+  color: #9d9d9d;
+  background-color: #252526;
+  border: none;
+  border-top: 1px solid #3c3c3c;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.terminal-reopen-bar:hover {
+  background-color: #2d2d38;
+  color: #ffffff;
 }
 
 .terminal-toolbar {

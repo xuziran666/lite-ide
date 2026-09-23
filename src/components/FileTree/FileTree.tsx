@@ -21,7 +21,11 @@ interface NewMenuState {
   y: number;
 }
 
-function FileTree() {
+interface FileTreeProps {
+  onCollapse: () => void;
+}
+
+function FileTree({ onCollapse }: FileTreeProps) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const openWorkspace = useWorkspaceStore((s) => s.openWorkspace);
   const root = useFileTreeStore((s) => s.root);
@@ -91,6 +95,14 @@ function FileTree() {
           {rootName}
         </span>
         <div className="file-tree-actions">
+          <button
+            type="button"
+            className="icon-btn"
+            title="折叠文件树"
+            onClick={onCollapse}
+          >
+            «
+          </button>
           <button
             type="button"
             className="icon-btn"

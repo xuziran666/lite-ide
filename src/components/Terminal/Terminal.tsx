@@ -21,7 +21,11 @@ function toUint8Array(message: unknown): Uint8Array {
   return new Uint8Array();
 }
 
-function TerminalPane() {
+interface TerminalPaneProps {
+  onCollapse: () => void;
+}
+
+function TerminalPane({ onCollapse }: TerminalPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -76,10 +80,13 @@ function TerminalPane() {
 
     const onResize = () => {
       requestAnimationFrame(() => {
-        if (!termRef.current) return;
+        const term = termRef.current;
+        if (!term) return;
         try {
           fit.fit();
-          void terminalResize(term.cols, term.rows).catch(() => undefined);
+          if (term.cols > 0 && term.rows > 0) {
+            void terminalResize(term.cols, term.rows).catch(() => undefined);
+          }
         } catch {
           // container not sized yet; the observer will fire again
         }
@@ -130,6 +137,13 @@ function TerminalPane() {
           onClick={clear}
         >
           清屏
+        </button>
+        <button
+          type="button"
+          className="terminal-toolbar-button"
+          onClick={onCollapse}
+        >
+          折叠
         </button>
       </div>
       <div className="terminal-host" ref={hostRef} />
