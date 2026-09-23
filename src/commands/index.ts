@@ -20,3 +20,19 @@ export function setWorkspace(path: string): Promise<string> {
 export function getWorkspace(): Promise<string | null> {
   return invoke<string | null>("get_workspace");
 }
+
+export function createFile(parent: string, name: string): Promise<DirEntry> {
+  return invoke<DirEntry>("create_file", { parent, name });
+}
+
+export function createDir(parent: string, name: string): Promise<DirEntry> {
+  return invoke<DirEntry>("create_dir", { parent, name });
+}
+
+export function renameEntry(path: string, newName: string): Promise<string> {
+  return invoke<string>("rename_entry", { path, newName });
+}
+
+export function deleteEntry(path: string): Promise<void> {
+  return invoke<void>("delete_entry", { path });
+}

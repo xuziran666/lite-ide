@@ -8,7 +8,9 @@ function Editor() {
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const activePath = useEditorStore((s) => s.activePath);
   const error = useEditorStore((s) => s.error);
+  const externalNotice = useEditorStore((s) => s.externalNotice);
   const clearError = useEditorStore((s) => s.clearError);
+  const dismissExternalNotice = useEditorStore((s) => s.dismissExternalNotice);
   const save = useEditorStore((s) => s.save);
 
   useEffect(() => {
@@ -58,6 +60,22 @@ function Editor() {
         <div className="editor-error-bar">
           <span className="editor-error-text">{error}</span>
           <button type="button" className="editor-error-close" onClick={clearError}>
+            关闭
+          </button>
+        </div>
+      )}
+      {externalNotice && externalNotice.length > 0 && (
+        <div className="editor-external-bar">
+          <span className="editor-error-text">
+            {externalNotice.map((n) => (
+              <div key={n}>{n}</div>
+            ))}
+          </span>
+          <button
+            type="button"
+            className="editor-error-close"
+            onClick={dismissExternalNotice}
+          >
             关闭
           </button>
         </div>

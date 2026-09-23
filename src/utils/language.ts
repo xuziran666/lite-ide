@@ -3,6 +3,13 @@ export function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+export function dirname(path: string): string {
+  const parts = path.split(/[\\/]/);
+  parts.pop();
+  const out = parts.join("/");
+  return out || path;
+}
+
 export function languageForPath(path: string): string {
   const dot = path.lastIndexOf(".");
   if (dot < 0) return "plaintext";

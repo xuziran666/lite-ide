@@ -1,6 +1,7 @@
 pub mod commands;
 mod error;
 mod state;
+mod watcher;
 
 use state::AppState;
 
@@ -13,6 +14,10 @@ pub fn run() {
             commands::fs::list_dir,
             commands::fs::read_file,
             commands::fs::write_file,
+            commands::fs::create_file,
+            commands::fs::create_dir,
+            commands::fs::rename_entry,
+            commands::fs::delete_entry,
             commands::fs::set_workspace,
             commands::fs::get_workspace,
         ])

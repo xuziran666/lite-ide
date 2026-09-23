@@ -8,11 +8,17 @@ interface EditorStore {
   openFiles: Tab[];
   activePath: string | null;
   error: string | null;
+  externalNotice: string[] | null;
   openFile: (path: string) => Promise<void>;
   setActive: (path: string) => void;
   closeTab: (path: string) => void;
   save: (path?: string) => Promise<boolean>;
+  markDirty: (path: string, dirty: boolean) => void;
+  applyRename: (path: string, newPath: string) => void;
+  applyDelete: (path: string) => void;
+  onExternalChange: (paths: string[]) => Promise<void>;
   clearError: () => void;
+  dismissExternalNotice: () => void;
   reset: () => void;
 }
 
@@ -20,6 +26,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   openFiles: [],
   activePath: null,
   error: null,
+  externalNotice: null,
 
   openFile: async (path: string) => {
     if (get().openFiles.some((t) => t.path === path)) {
@@ -41,11 +48,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
 
     modelStore.createModel(path, content, (dirty) => {
-      set((s) => ({
-        openFiles: s.openFiles.map((t) =>
-          t.path === path ? { ...t, dirty } : t,
-        ),
-      }));
+      get().markDirty(path, dirty);
     });
 
     set((s) => ({
@@ -106,12 +109,80 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
   },
 
+  markDirty: (path: string, dirty: boolean) => {
+    set((s) => ({
+      openFiles: s.openFiles.map((t) =>
+        t.path === path ? { ...t, dirty } : t,
+      ),
+    }));
+  },
+
+  applyRename: (path: string, newPath: string) => {
+    const { openFiles } = get();
+    if (!openFiles.some((t) => t.path === path)) return;
+
+    const dirty = modelStore.isDirty(path);
+    modelStore.rekeyPath(path, newPath, (d) => get().markDirty(newPath, d));
+
+    set((s) => ({
+      openFiles: s.openFiles.map((t) =>
+        t.path === path
+          ? {
+              path: newPath,
+              name: basename(newPath),
+              language: languageForPath(newPath),
+              dirty,
+            }
+          : t,
+      ),
+      activePath: s.activePath === path ? newPath : s.activePath,
+    }));
+  },
+
+  applyDelete: (path: string) => {
+    const tab = get().openFiles.find((t) => t.path === path);
+    if (!tab) return;
+    if (tab.dirty) return;
+    get().closeTab(path);
+  },
+
+  onExternalChange: async (paths: string[]) => {
+    const notices: string[] = [];
+    for (const p of paths) {
+      if (!get().openFiles.some((t) => t.path === p)) continue;
+
+      if (modelStore.isDirty(p)) {
+        notices.push(`${basename(p)} 已在磁盘上被修改，本地未保存的更改已保留`);
+        continue;
+      }
+
+      try {
+        const content = await readFile(p);
+        if (modelStore.isDirty(p)) {
+          notices.push(`${basename(p)} 已在磁盘上被修改，本地未保存的更改已保留`);
+          continue;
+        }
+        modelStore.setModelContent(p, content);
+        get().markDirty(p, false);
+      } catch {
+        // The file may have been deleted between the event and the read.
+      }
+    }
+    if (notices.length > 0) {
+      set((s) => ({
+        externalNotice: [...(s.externalNotice ?? []), ...notices],
+      }));
+    }
+  },
+
   clearError: () => set({ error: null }),
+
+  dismissExternalNotice: () => set({ externalNotice: null }),
 
   reset: () => {
     for (const t of get().openFiles) {
       modelStore.disposeModel(t.path);
     }
-    set({ openFiles: [], activePath: null, error: null });
+    set({ openFiles: [], activePath: null, error: null, externalNotice: null });
   },
 }));
