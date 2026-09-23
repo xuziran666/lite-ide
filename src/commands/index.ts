@@ -45,18 +45,29 @@ export function deleteEntry(path: string): Promise<void> {
   return invoke<void>("delete_entry", { path });
 }
 
-export function terminalSpawn(channel: Channel<Uint8Array>): Promise<void> {
-  return invoke<void>("terminal_spawn", { channel });
+export function terminalSpawn(
+  id: number,
+  channel: Channel<Uint8Array>,
+): Promise<void> {
+  return invoke<void>("terminal_spawn", { id, channel });
 }
 
-export function terminalWrite(data: string): Promise<void> {
-  return invoke<void>("terminal_write", { data });
+export function terminalWrite(id: number, data: string): Promise<void> {
+  return invoke<void>("terminal_write", { id, data });
 }
 
-export function terminalResize(cols: number, rows: number): Promise<void> {
-  return invoke<void>("terminal_resize", { cols, rows });
+export function terminalResize(
+  id: number,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  return invoke<void>("terminal_resize", { id, cols, rows });
 }
 
-export function terminalKill(): Promise<void> {
-  return invoke<void>("terminal_kill");
+export function terminalKill(id: number): Promise<void> {
+  return invoke<void>("terminal_kill", { id });
+}
+
+export function terminalKillAll(): Promise<void> {
+  return invoke<void>("terminal_kill_all");
 }

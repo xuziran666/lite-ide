@@ -11,6 +11,7 @@ import Splitter from "../Splitter";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useTerminalStore } from "../../stores/terminalStore";
 
 const MIN_TREE_WIDTH = 180;
 const MAX_TREE_WIDTH = 500;
@@ -59,7 +60,7 @@ function AppLayout() {
     clamp(DEFAULT_TERMINAL_HEIGHT, MIN_TERMINAL_HEIGHT, terminalMaxHeight()),
   );
   const [fileTreeCollapsed, setFileTreeCollapsed] = useState(false);
-  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+  const [terminalCollapsed, setTerminalCollapsed] = useState(true);
   const [closingDirtyNames, setClosingDirtyNames] = useState<string[] | null>(null);
   const [savingAll, setSavingAll] = useState(false);
 
@@ -123,6 +124,22 @@ function AppLayout() {
       .catch(() => undefined);
   }, [workspacePath]);
 
+  // The terminal starts collapsed for every workspace; expanding it the first
+  // time creates Terminal 1 (no pty is ever spawned while the panel is hidden).
+  useEffect(() => {
+    const store = useTerminalStore.getState();
+    if (!terminalCollapsed && store.terminals.length === 0) {
+      store.create();
+    }
+  }, [terminalCollapsed]);
+
+  // Entering a workspace folds the panel again. The backend kills every pty on
+  // `set_workspace` and the store was already reset, so nothing leaks.
+  useEffect(() => {
+    if (!workspacePath) return;
+    setTerminalCollapsed(true);
+  }, [workspacePath]);
+
   // Keep the tree in sync with the file that owns the active tab.
   useEffect(() => {
     if (!activePath) return;
@@ -147,6 +164,13 @@ function AppLayout() {
       if (!e.shiftKey && key === "b") {
         e.preventDefault();
         setFileTreeCollapsed((value) => !value);
+        return;
+      }
+      if (e.code === "Backquote" && e.shiftKey) {
+        if (isTextInputFocused()) return;
+        e.preventDefault();
+        setTerminalCollapsed(false);
+        useTerminalStore.getState().create();
         return;
       }
       if (!e.shiftKey && e.code === "Backquote") {

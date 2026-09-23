@@ -66,41 +66,61 @@ fn resolve_cwd(state: &AppState) -> Result<PathBuf, String> {
     })
 }
 
-/// Spawn a new shell in a pseudo-terminal with the current shell/cwd. Any
-/// previously running session is killed first (restart semantics).
+/// Spawn a new shell in a pseudo-terminal with the current shell/cwd. The
+/// session is registered under the frontend-assigned `id`. A restart of the
+/// same terminal is done by `terminal_kill(id)` followed by another spawn.
 #[tauri::command]
 pub fn terminal_spawn(
     state: State<'_, AppState>,
+    id: u64,
     channel: Channel<Vec<u8>>,
 ) -> Result<(), String> {
-    state.kill_terminal();
     let cwd = resolve_cwd(&state)?;
     let session = TerminalSession::spawn(current_shell(), Some(normalize_cwd(&cwd)), channel)?;
-    state.set_terminal(session);
+    state.set_terminal(id, session);
     Ok(())
 }
 
+/// Write user input for the terminal session with the given id.
 #[tauri::command]
-pub fn terminal_write(state: State<'_, AppState>, data: String) -> Result<(), String> {
-    let mut session = state.terminal()?;
-    let terminal = session
-        .as_mut()
-        .ok_or_else(|| "no terminal session is running".to_string())?;
-    terminal.write(&data)
+pub fn terminal_write(
+    state: State<'_, AppState>,
+    id: u64,
+    data: String,
+) -> Result<(), String> {
+    let mut sessions = state.terminals()?;
+    let session = sessions
+        .get_mut(&id)
+        .ok_or_else(|| "no terminal session with that id is running".to_string())?;
+    session.write(&data)
 }
 
+/// Inform the terminal session with the given id that its visible size changed.
 #[tauri::command]
-pub fn terminal_resize(state: State<'_, AppState>, cols: u16, rows: u16) -> Result<(), String> {
-    let mut session = state.terminal()?;
-    let terminal = session
-        .as_mut()
-        .ok_or_else(|| "no terminal session is running".to_string())?;
-    terminal.resize(cols, rows)
+pub fn terminal_resize(
+    state: State<'_, AppState>,
+    id: u64,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state.terminals()?;
+    let session = sessions
+        .get(&id)
+        .ok_or_else(|| "no terminal session with that id is running".to_string())?;
+    session.resize(cols, rows)
 }
 
+/// Kill the terminal session with the given id.
 #[tauri::command]
-pub fn terminal_kill(state: State<'_, AppState>) -> Result<(), String> {
-    state.kill_terminal();
+pub fn terminal_kill(state: State<'_, AppState>, id: u64) -> Result<(), String> {
+    state.kill_terminal(id);
+    Ok(())
+}
+
+/// Kill every running terminal session (workspace switch, app exit).
+#[tauri::command]
+pub fn terminal_kill_all(state: State<'_, AppState>) -> Result<(), String> {
+    state.kill_all_terminals();
     Ok(())
 }
 

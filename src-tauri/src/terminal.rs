@@ -116,6 +116,15 @@ impl TerminalSession {
     }
 }
 
+/// Safety net: a session that is dropped without being explicitly killed
+/// (e.g. the map is cleared, or the terminal state is replaced) still
+/// terminates its shell instead of leaving an orphan process behind.
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 /// Read the pty output into a shared buffer; a flusher thread batches it into
 /// bounded 4KB/16ms chunks and sends them over the channel. A final empty chunk
 /// signals that the shell has exited.

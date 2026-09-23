@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -9,7 +10,7 @@ use crate::watcher::WorkspaceWatcher;
 pub struct AppState {
     workspace: Mutex<Option<PathBuf>>,
     watcher: Mutex<Option<WorkspaceWatcher>>,
-    terminal: Mutex<Option<TerminalSession>>,
+    terminals: Mutex<HashMap<u64, TerminalSession>>,
 }
 
 impl AppState {
@@ -17,12 +18,12 @@ impl AppState {
         Self {
             workspace: Mutex::new(None),
             watcher: Mutex::new(None),
-            terminal: Mutex::new(None),
+            terminals: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn set_workspace(&self, path: PathBuf, app: AppHandle) -> Result<(), String> {
-        self.kill_terminal();
+        self.kill_all_terminals();
         let mut guard = self
             .workspace
             .lock()
@@ -54,28 +55,40 @@ impl AppState {
         Ok(guard.clone())
     }
 
-    pub fn set_terminal(&self, session: TerminalSession) {
+    pub fn set_terminal(&self, id: u64, session: TerminalSession) {
         let mut guard = self
-            .terminal
+            .terminals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = Some(session);
+        guard.insert(id, session);
     }
 
-    /// The current terminal session, or `None` when no shell is running.
-    pub fn terminal(&self) -> Result<MutexGuard<'_, Option<TerminalSession>>, String> {
-        self.terminal
+    /// All running terminal sessions keyed by their frontend-assigned id.
+    pub fn terminals(&self) -> Result<MutexGuard<'_, HashMap<u64, TerminalSession>>, String> {
+        self.terminals
             .lock()
             .map_err(|_| "terminal state is poisoned".to_string())
     }
 
-    /// Kill the running terminal session, if any, and release it.
-    pub fn kill_terminal(&self) {
+    /// Kill the terminal session with the given id, if it is still running,
+    /// and remove it from the map.
+    pub fn kill_terminal(&self, id: u64) {
         let mut guard = self
-            .terminal
+            .terminals
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(mut session) = guard.take() {
+        if let Some(mut session) = guard.remove(&id) {
+            session.kill();
+        }
+    }
+
+    /// Kill every running terminal session and clear the map.
+    pub fn kill_all_terminals(&self) {
+        let mut guard = self
+            .terminals
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for (_, mut session) in guard.drain() {
             session.kill();
         }
     }

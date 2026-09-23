@@ -578,6 +578,85 @@ body.layout-resizing-horizontal {
   color: #ffffff;
 }
 
+.terminal-toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.terminal-toolbar-button:disabled:hover {
+  background-color: transparent;
+  color: #cccccc;
+}
+
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding-right: 4px;
+}
+
+.terminal-tab {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  background-color: transparent;
+  color: #9d9d9d;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.terminal-tab:hover {
+  background-color: #2d2d38;
+  color: #ffffff;
+}
+
+.terminal-tab.active {
+  background-color: #37373d;
+  color: #ffffff;
+}
+
+.terminal-tab-add {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background-color: transparent;
+  color: #cccccc;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.terminal-tab-add:hover {
+  background-color: #2d2d38;
+  color: #ffffff;
+}
+
+.terminal-host-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-instance {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .terminal-host {
   flex: 1;
   min-height: 0;

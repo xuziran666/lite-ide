@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { getLastWorkspace, setWorkspace as setWorkspaceCommand } from "../commands";
 import { useEditorStore } from "./editorStore";
 import { useFileTreeStore } from "./fileTreeStore";
+import { useTerminalStore } from "./terminalStore";
 
 interface WorkspaceStore {
   workspacePath: string | null;
@@ -33,6 +34,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const resolved = await setWorkspaceCommand(path);
       useEditorStore.getState().reset();
       useFileTreeStore.getState().reset();
+      useTerminalStore.getState().reset();
       await useFileTreeStore.getState().loadRoot(resolved);
       set({ workspacePath: resolved, loading: false, error: null });
     } catch (e) {
