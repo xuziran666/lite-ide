@@ -33,6 +33,24 @@ function workspaceName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+// IDE-level shortcuts must not steal keys while the user types in the terminal
+// or in a plain text input. The Monaco editor qualifies as editor input, so a
+// textarea inside it (its hidden IME element) does not block shortcuts.
+function isTextInputFocused(): boolean {
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  const node = el as HTMLElement;
+  if (node.closest?.(".terminal-host")) return true;
+  const tag = el.tagName;
+  if (
+    (tag === "INPUT" || tag === "TEXTAREA") &&
+    !node.closest?.(".monaco-editor")
+  ) {
+    return true;
+  }
+  return node.isContentEditable;
+}
+
 function AppLayout() {
   const [fileTreeWidth, setFileTreeWidth] = useState(() =>
     clamp(DEFAULT_TREE_WIDTH, MIN_TREE_WIDTH, MAX_TREE_WIDTH),
@@ -141,6 +159,12 @@ function AppLayout() {
         if (!store.activePath) return;
         e.preventDefault();
         store.requestCloseTab(store.activePath);
+        return;
+      }
+      if (e.shiftKey && key === "t") {
+        if (isTextInputFocused()) return;
+        e.preventDefault();
+        void useEditorStore.getState().restoreClosedTab();
         return;
       }
       if (e.key === "Tab") {

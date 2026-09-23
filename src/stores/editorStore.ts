@@ -1,8 +1,20 @@
 import { create } from "zustand";
 import type { CursorInfo, Tab } from "../types";
-import { readFile, writeFile } from "../commands";
+import { listDir, readFile, writeFile } from "../commands";
 import * as modelStore from "../editor/modelStore";
-import { basename, languageForPath } from "../utils/language";
+import { basename, dirname, languageForPath } from "../utils/language";
+
+/**
+ * Tabs being closed in a batch (close others / close right / close all).
+ * `dirtyTargets` holds the tabs that still need a save/discard decision, asked
+ * one at a time through the existing confirm modal. `finalActive` is the active
+ * path to apply once the whole batch finishes.
+ */
+interface PendingCloseQueue {
+  anchor: string | null;
+  dirtyTargets: string[];
+  finalActive: string | null;
+}
 
 interface EditorStore {
   openFiles: Tab[];
@@ -11,10 +23,24 @@ interface EditorStore {
   externalNotice: string[] | null;
   /** Dirty tab waiting for a save/discard decision before it can be closed. */
   pendingClosePath: string | null;
+  /** Batch close state, null while only single-tab closes happen. */
+  pendingCloseQueue: PendingCloseQueue | null;
+  /** Recently closed tab paths, most recent first (LIFO). Never persisted. */
+  closedTabs: string[];
   cursor: CursorInfo | null;
   openFile: (path: string) => Promise<void>;
   setActive: (path: string) => void;
-  closeTab: (path: string) => void;
+  closeTab: (path: string, record?: boolean) => void;
+  closeMany: (
+    paths: string[],
+    record: boolean,
+    activeOverride: string | null | undefined,
+  ) => void;
+  beginBatchClose: (
+    anchor: string | null,
+    targets: string[],
+    finalActive: string | null,
+  ) => void;
   requestCloseTab: (path: string) => void;
   confirmCloseTab: (saveChanges: boolean) => Promise<void>;
   cancelCloseTab: () => void;
@@ -25,9 +51,19 @@ interface EditorStore {
   applyRename: (path: string, newPath: string) => void;
   applyDelete: (path: string) => void;
   onExternalChange: (paths: string[]) => Promise<void>;
+  reorderTabs: (fromIndex: number, toIndex: number) => void;
+  closeOthers: (path: string) => void;
+  closeRight: (path: string) => void;
+  closeAll: () => void;
+  restoreClosedTab: () => Promise<void>;
   clearError: () => void;
   dismissExternalNotice: () => void;
   reset: () => void;
+}
+
+/** Prepend a path to the closed-tab stack, dropping any older entry for it. */
+function pushClosedTab(closedTabs: string[], path: string): string[] {
+  return [path, ...closedTabs.filter((p) => p !== path)];
 }
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
@@ -36,6 +72,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   error: null,
   externalNotice: null,
   pendingClosePath: null,
+  pendingCloseQueue: null,
+  closedTabs: [],
   cursor: null,
 
   openFile: async (path: string) => {
@@ -80,24 +118,57 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({ activePath: path, error: null });
   },
 
-  closeTab: (path: string) => {
-    modelStore.disposeModel(path);
+  // Close one or more tabs in a single state transition, keeping the existing
+  // single-close behavior when `activeOverride` is undefined. `record` controls
+  // whether the closed paths are pushed onto the closed-tab history.
+  closeMany: (
+    paths: string[],
+    record: boolean,
+    activeOverride: string | null | undefined,
+  ) => {
     const { openFiles, activePath } = get();
-    const idx = openFiles.findIndex((t) => t.path === path);
-    if (idx < 0) return;
+    const closing = new Set(paths);
+    const targets = paths.filter((p) => openFiles.some((t) => t.path === p));
+    if (targets.length === 0) return;
 
-    const remaining = openFiles.filter((t) => t.path !== path);
-    let active = activePath;
-    if (activePath === path) {
-      const next = remaining[idx] ?? remaining[idx - 1] ?? null;
-      active = next ? next.path : null;
+    for (const p of targets) {
+      modelStore.disposeModel(p);
     }
-    set((s) => ({
-      openFiles: remaining,
-      activePath: active,
-      error: null,
-      pendingClosePath: s.pendingClosePath === path ? null : s.pendingClosePath,
-    }));
+
+    const remaining = openFiles.filter((t) => !closing.has(t.path));
+    let active = activePath;
+    if (activePath && closing.has(activePath)) {
+      if (activeOverride !== undefined) {
+        active = activeOverride;
+      } else {
+        const idx = openFiles.findIndex((t) => t.path === activePath);
+        const next = remaining[idx] ?? remaining[idx - 1] ?? null;
+        active = next ? next.path : null;
+      }
+    }
+
+    set((s) => {
+      let closed = s.closedTabs;
+      if (record) {
+        for (const p of targets) {
+          closed = pushClosedTab(closed, p);
+        }
+      }
+      return {
+        openFiles: remaining,
+        activePath: active,
+        error: null,
+        closedTabs: closed,
+        pendingClosePath:
+          s.pendingClosePath && closing.has(s.pendingClosePath)
+            ? null
+            : s.pendingClosePath,
+      };
+    });
+  },
+
+  closeTab: (path: string, record = true) => {
+    get().closeMany([path], record, undefined);
   },
 
   save: async (path?: string) => {
@@ -134,17 +205,52 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({ pendingClosePath: path });
   },
 
-  cancelCloseTab: () => set({ pendingClosePath: null }),
+  cancelCloseTab: () => {
+    if (get().pendingCloseQueue) {
+      set({ pendingCloseQueue: null, pendingClosePath: null });
+      return;
+    }
+    set({ pendingClosePath: null });
+  },
 
   confirmCloseTab: async (saveChanges: boolean) => {
     const path = get().pendingClosePath;
     if (!path) return;
+
+    const queue = get().pendingCloseQueue;
+    if (queue) {
+      if (saveChanges) {
+        const ok = await get().save(path);
+        // Keep the confirmation open when saving fails, so nothing is lost.
+        if (!ok) return;
+      }
+      const remaining = queue.dirtyTargets.filter((p) => p !== path);
+      // Discarded dirty content is not recoverable, so only saved closes are
+      // recorded in the closed-tab history.
+      get().closeTab(path, saveChanges);
+      if (remaining.length > 0) {
+        set({
+          pendingCloseQueue: { ...queue, dirtyTargets: remaining },
+          pendingClosePath: remaining[0],
+        });
+      } else {
+        set({ pendingCloseQueue: null, pendingClosePath: null });
+        const finalActive =
+          queue.finalActive &&
+          get().openFiles.some((t) => t.path === queue.finalActive)
+            ? queue.finalActive
+            : null;
+        set({ activePath: finalActive });
+      }
+      return;
+    }
+
     if (saveChanges) {
       const ok = await get().save(path);
       // Keep the confirmation open when saving fails, so nothing is lost.
       if (!ok) return;
     }
-    get().closeTab(path);
+    get().closeTab(path, saveChanges);
     set({ pendingClosePath: null });
   },
 
@@ -193,7 +299,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const tab = get().openFiles.find((t) => t.path === path);
     if (!tab) return;
     if (tab.dirty) return;
-    get().closeTab(path);
+    // A deleted file cannot be reopened, so don't add it to the history.
+    get().closeTab(path, false);
   },
 
   onExternalChange: async (paths: string[]) => {
@@ -225,6 +332,131 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }
   },
 
+  reorderTabs: (fromIndex: number, toIndex: number) => {
+    const { openFiles } = get();
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= openFiles.length ||
+      toIndex >= openFiles.length
+    ) {
+      return;
+    }
+    const next = [...openFiles];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    set({ openFiles: next, error: null });
+  },
+
+  // Start a batch close while keeping dirty tabs protected. Clean targets are
+  // closed right away; dirty targets are confirmed one at a time through the
+  // existing save/discard modal.
+  beginBatchClose: (
+    anchor: string | null,
+    targets: string[],
+    finalActive: string | null,
+  ) => {
+    const openFiles = get().openFiles;
+    const existing = targets.filter((p) =>
+      openFiles.some((t) => t.path === p),
+    );
+    if (existing.length === 0) return;
+
+    const dirtyTargets = existing.filter(
+      (p) => get().openFiles.find((t) => t.path === p)?.dirty,
+    );
+    const cleanTargets = existing.filter((p) => !dirtyTargets.includes(p));
+
+    if (cleanTargets.length > 0) {
+      get().closeMany(cleanTargets, true, undefined);
+    }
+
+    if (dirtyTargets.length === 0) {
+      set({
+        activePath: finalActive,
+        pendingCloseQueue: null,
+        pendingClosePath: null,
+      });
+      return;
+    }
+
+    set({
+      pendingCloseQueue: { anchor, dirtyTargets, finalActive },
+      pendingClosePath: dirtyTargets[0],
+    });
+  },
+
+  closeOthers: (path: string) => {
+    const { openFiles } = get();
+    if (!openFiles.some((t) => t.path === path)) return;
+    const targets = openFiles
+      .filter((t) => t.path !== path)
+      .map((t) => t.path);
+    get().beginBatchClose(path, targets, path);
+  },
+
+  closeRight: (path: string) => {
+    const { openFiles, activePath } = get();
+    const idx = openFiles.findIndex((t) => t.path === path);
+    if (idx < 0) return;
+    const targets = openFiles.slice(idx + 1).map((t) => t.path);
+    const finalActive =
+      activePath && openFiles.slice(idx).some((t) => t.path === activePath)
+        ? path
+        : activePath;
+    get().beginBatchClose(path, targets, finalActive);
+  },
+
+  closeAll: () => {
+    const targets = get().openFiles.map((t) => t.path);
+    get().beginBatchClose(null, targets, null);
+  },
+
+  restoreClosedTab: async () => {
+    const skipped: string[] = [];
+    for (;;) {
+      const { closedTabs, openFiles } = get();
+      if (closedTabs.length === 0) break;
+
+      // Never duplicate an already open tab; just activate it.
+      const alreadyOpen = closedTabs.find((p) =>
+        openFiles.some((t) => t.path === p),
+      );
+      if (alreadyOpen) {
+        set({
+          closedTabs: closedTabs.filter((p) => p !== alreadyOpen),
+          activePath: alreadyOpen,
+          error: null,
+        });
+        return;
+      }
+
+      const path = closedTabs[0];
+      set({ closedTabs: closedTabs.slice(1) });
+
+      let exists = false;
+      try {
+        const entries = await listDir(dirname(path));
+        exists = entries.some((e) => e.path === path && !e.is_dir);
+      } catch {
+        exists = false;
+      }
+      if (!exists) {
+        skipped.push(path);
+        continue;
+      }
+
+      await get().openFile(path);
+      return;
+    }
+    if (skipped.length > 0) {
+      set({
+        error: `${skipped.map((p) => basename(p)).join("、")} 已不存在，已从最近关闭中移除`,
+      });
+    }
+  },
+
   clearError: () => set({ error: null }),
 
   dismissExternalNotice: () => set({ externalNotice: null }),
@@ -239,6 +471,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       error: null,
       externalNotice: null,
       pendingClosePath: null,
+      pendingCloseQueue: null,
+      closedTabs: [],
       cursor: null,
     });
   },

@@ -371,6 +371,11 @@ body.layout-resizing-horizontal {
   color: #cccccc;
 }
 
+.tab.dragging {
+  opacity: 0.45;
+  background-color: #2a2d2e;
+}
+
 .tab.active {
   background-color: #1e1e1e;
   color: #ffffff;
