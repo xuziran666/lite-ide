@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, Channel } from "@tauri-apps/api/core";
 import type { DirEntry } from "../types";
 
 export function listDir(path: string): Promise<DirEntry[]> {
@@ -35,4 +35,20 @@ export function renameEntry(path: string, newName: string): Promise<string> {
 
 export function deleteEntry(path: string): Promise<void> {
   return invoke<void>("delete_entry", { path });
+}
+
+export function terminalSpawn(channel: Channel<Uint8Array>): Promise<void> {
+  return invoke<void>("terminal_spawn", { channel });
+}
+
+export function terminalWrite(data: string): Promise<void> {
+  return invoke<void>("terminal_write", { data });
+}
+
+export function terminalResize(cols: number, rows: number): Promise<void> {
+  return invoke<void>("terminal_resize", { cols, rows });
+}
+
+export function terminalKill(): Promise<void> {
+  return invoke<void>("terminal_kill");
 }

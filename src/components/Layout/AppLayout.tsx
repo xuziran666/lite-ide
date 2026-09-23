@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import FileTree from "../FileTree/FileTree";
 import Tabs from "../Editor/Tabs";
 import Editor from "../Editor/Editor";
-import TerminalPlaceholder from "../Terminal/TerminalPlaceholder";
+import TerminalPane from "../Terminal/Terminal";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 
@@ -35,7 +35,7 @@ function AppLayout() {
       <div className="main-area">
         <Tabs />
         <Editor />
-        <TerminalPlaceholder />
+        <TerminalPane />
       </div>
     </div>
   );

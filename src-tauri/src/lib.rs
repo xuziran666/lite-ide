@@ -1,6 +1,7 @@
 pub mod commands;
 mod error;
 mod state;
+mod terminal;
 mod watcher;
 
 use state::AppState;
@@ -20,6 +21,10 @@ pub fn run() {
             commands::fs::delete_entry,
             commands::fs::set_workspace,
             commands::fs::get_workspace,
+            commands::terminal::terminal_spawn,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
