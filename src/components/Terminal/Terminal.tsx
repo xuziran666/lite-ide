@@ -11,6 +11,7 @@ import {
   terminalKill,
 } from "../../commands";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { useTaskStore } from "../../stores/taskStore";
 
 function toUint8Array(message: unknown): Uint8Array {
   if (message instanceof Uint8Array) return message;
@@ -20,6 +21,13 @@ function toUint8Array(message: unknown): Uint8Array {
   }
   return new Uint8Array();
 }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** How long to wait after Ctrl+C before starting the next task. */
+const INTERRUPT_WAIT_MS = 350;
 
 interface TerminalInstanceApi {
   clear: () => void;
@@ -32,13 +40,17 @@ interface InstanceRegistry {
   current: Map<number, TerminalInstanceApi>;
 }
 
-interface TerminalInstanceProps {
-  id: number;
-  active: boolean;
-  instances: InstanceRegistry;
-}
-
-function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
+/**
+ * Shared pty lifecycle for a terminal instance: xterm + fit + WebGL, the
+ * spawn/resize/write channel and the exit marker.
+ *
+ * Extra handles for the task terminal:
+ * - `spawnedOnceRef` becomes true after the first spawn of the instance;
+ * - `runAfterSpawn(fn)` registers a callback that runs once after the next
+ *   (re)spawn finishes, so a command can be written the moment the shell is
+ *   ready.
+ */
+function usePtySession(id: number, active: boolean) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -50,11 +62,17 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
   const exited = useTerminalStore(
     (s) => s.terminals.find((t) => t.id === id)?.exited ?? false,
   );
+  const spawnedOnceRef = useRef(false);
+  const afterSpawnRef = useRef<(() => void) | null>(null);
 
   const restart = useCallback(() => {
     useTerminalStore.getState().markRunning(id);
     setRunStamp((r) => r + 1);
   }, [id]);
+
+  const runAfterSpawn = useCallback((fn: () => void) => {
+    afterSpawnRef.current = fn;
+  }, []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -106,15 +124,18 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
     // collapsed panel reports nothing at all.
     const onResize = () => {
       requestAnimationFrame(() => {
-        const term = termRef.current;
-        if (!term) return;
+        const current = termRef.current;
+        if (!current) return;
         if (!activeRef.current) return;
-        const host = hostRef.current;
-        if (!host || host.clientWidth === 0 || host.clientHeight === 0) return;
+        const container = hostRef.current;
+        if (!container || container.clientWidth === 0 || container.clientHeight === 0)
+          return;
         try {
           fit.fit();
-          if (term.cols > 0 && term.rows > 0) {
-            void terminalResize(id, term.cols, term.rows).catch(() => undefined);
+          if (current.cols > 0 && current.rows > 0) {
+            void terminalResize(id, current.cols, current.rows).catch(
+              () => undefined,
+            );
           }
         } catch {
           // container not sized yet; the observer will fire again
@@ -131,7 +152,14 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
 
     chainRef.current = chainRef.current
       .then(() => terminalKill(id).catch(() => undefined))
-      .then(() => terminalSpawn(id, channel));
+      .then(() => terminalSpawn(id, channel))
+      .then(() => {
+        if (version !== versionRef.current) return;
+        spawnedOnceRef.current = true;
+        const fn = afterSpawnRef.current;
+        afterSpawnRef.current = null;
+        fn?.();
+      });
     void chainRef.current;
 
     return () => {
@@ -156,7 +184,115 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
     });
   }, [active]);
 
+  return { hostRef, termRef, restart, exited, spawnedOnceRef, runAfterSpawn };
+}
+
+interface TerminalInstanceProps {
+  id: number;
+  active: boolean;
+  instances: InstanceRegistry;
+}
+
+function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
+  const { hostRef, termRef, restart, exited } = usePtySession(id, active);
+
   // Publish the instance actions so the pane toolbar can target the active one.
+  useEffect(() => {
+    instances.current.set(id, {
+      clear: () => {
+        termRef.current?.clear();
+        termRef.current?.focus();
+      },
+      restart,
+    });
+    return () => {
+      instances.current.delete(id);
+    };
+  }, [id, instances, restart]);
+
+  return (
+    <div
+      className={active ? "terminal-instance active" : "terminal-instance"}
+      style={{ display: active ? undefined : "none" }}
+    >
+      <div className="terminal-host" ref={hostRef} />
+      {exited && (
+        <div className="terminal-exited-bar">
+          <span>进程已退出</span>
+          <button type="button" className="terminal-restart" onClick={restart}>
+            重启
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface TaskTerminalInstanceProps {
+  id: number;
+  active: boolean;
+  instances: InstanceRegistry;
+}
+
+/**
+ * The single dedicated task terminal. It is a normal shell that additionally
+ * consumes `taskStore.pendingTask`: it interrupts a running task with Ctrl+C,
+ * then writes the resolved command to the shell. If the shell already exited it
+ * respawns first, and a command issued before the very first spawn is queued
+ * behind it.
+ */
+function TaskTerminalInstance({
+  id,
+  active,
+  instances,
+}: TaskTerminalInstanceProps) {
+  const { hostRef, termRef, restart, exited, spawnedOnceRef, runAfterSpawn } =
+    usePtySession(id, active);
+  const pending = useTaskStore((s) => s.pendingTask);
+  const taskStatus = useTaskStore((s) => s.taskStatus);
+
+  const statusRef = useRef(taskStatus);
+  statusRef.current = taskStatus;
+  const exitedRef = useRef(exited);
+  exitedRef.current = exited;
+
+  // A dead shell means the task itself is exited until it is restarted.
+  useEffect(() => {
+    if (exited) useTaskStore.getState().markExited();
+  }, [exited]);
+
+  useEffect(() => {
+    if (!pending) return;
+    let cancelled = false;
+    const writeCommand = () =>
+      void terminalWrite(id, `${pending.command}\r`).catch(() => undefined);
+
+    void (async () => {
+      if (statusRef.current === "running") {
+        await terminalWrite(id, "\u0003").catch(() => undefined);
+        await sleep(INTERRUPT_WAIT_MS);
+      }
+      if (cancelled) return;
+
+      if (exitedRef.current) {
+        // Respawn the shell, writing the command once it is back.
+        runAfterSpawn(writeCommand);
+        restart();
+      } else if (spawnedOnceRef.current) {
+        writeCommand();
+      } else {
+        // First run on a freshly created session while the spawn is in flight.
+        runAfterSpawn(writeCommand);
+      }
+      useTaskStore.getState().markRunning(pending.name);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, pending, restart, runAfterSpawn]);
+
+  // Publish so the pane toolbar can target the task terminal as well.
   useEffect(() => {
     instances.current.set(id, {
       clear: () => {
@@ -198,7 +334,13 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
   const create = useTerminalStore((s) => s.create);
   const close = useTerminalStore((s) => s.close);
   const select = useTerminalStore((s) => s.select);
+  const taskTerminalId = useTaskStore((s) => s.taskTerminalId);
+  const taskRunning = useTaskStore((s) => s.taskStatus === "running");
   const instances = useRef(new Map<number, TerminalInstanceApi>());
+
+  const taskTab =
+    terminals.find((t) => t.id === taskTerminalId) ?? null;
+  const normalTerminals = terminals.filter((t) => t.kind !== "task");
 
   const clearActive = () => {
     if (activeId == null) return;
@@ -219,7 +361,22 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
     <section className="terminal-pane">
       <div className="terminal-toolbar">
         <div className="terminal-tabs">
-          {terminals.map((t) => (
+          {taskTab && (
+            <button
+              key="task"
+              type="button"
+              className={
+                taskTab.id === activeId
+                  ? "terminal-tab task active"
+                  : "terminal-tab task"
+              }
+              title="任务终端"
+              onClick={() => select(taskTab.id)}
+            >
+              任务{taskRunning ? " ●" : ""}
+            </button>
+          )}
+          {normalTerminals.map((t) => (
             <button
               key={t.id}
               type="button"
@@ -236,7 +393,7 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
             type="button"
             className="terminal-tab-add"
             title="新建终端"
-            onClick={create}
+            onClick={() => create()}
           >
             +
           </button>
@@ -275,7 +432,15 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
         </button>
       </div>
       <div className="terminal-host-area">
-        {terminals.map((t) => (
+        {taskTab && (
+          <TaskTerminalInstance
+            key={taskTab.id}
+            id={taskTab.id}
+            active={taskTab.id === activeId}
+            instances={instances}
+          />
+        )}
+        {normalTerminals.map((t) => (
           <TerminalInstance
             key={t.id}
             id={t.id}

@@ -1,4 +1,5 @@
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useTaskStore } from "../../stores/taskStore";
 
 function workspaceName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -39,6 +40,9 @@ function TopBar({
   onToggleSecondarySidebar,
 }: TopBarProps) {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
+  const taskRunning = useTaskStore((s) => s.taskStatus === "running");
+  const toggleTaskCenter = useTaskStore((s) => s.toggleTaskCenter);
 
   return (
     <header className="top-bar">
@@ -59,8 +63,19 @@ function TopBar({
       >
         <SecondarySidebarIcon />
       </button>
-      {/* Reserved slot for the Task Center; not implemented yet. */}
-      <span className="top-bar-task-center" />
+      <div className="top-bar-task-center">
+        <button
+          type="button"
+          className={
+            taskCenterOpen ? "top-bar-task-trigger active" : "top-bar-task-trigger"
+          }
+          title="任务中心（双击 Ctrl）"
+          onClick={toggleTaskCenter}
+        >
+          {taskRunning && <span className="top-bar-task-dot" />}
+          任务
+        </button>
+      </div>
     </header>
   );
 }

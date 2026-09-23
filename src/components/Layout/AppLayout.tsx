@@ -10,10 +10,20 @@ import ActivityBar from "./ActivityBar";
 import StatusBar from "./StatusBar";
 import CloseConfirmDialog from "./CloseConfirmDialog";
 import Splitter from "../Splitter";
+import TaskCenter from "../Tasks/TaskCenter";
+import ToastStack from "../Toast/ToastStack";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { useTaskStore } from "../../stores/taskStore";
+import { useConfigStore } from "../../stores/configStore";
+import {
+  isDoubleCtrlChord,
+  parseChord,
+  chordMatches,
+  type KeybindingAction,
+} from "../../config/keybindings";
 
 const MIN_TREE_WIDTH = 180;
 const MAX_TREE_WIDTH = 500;
@@ -79,6 +89,8 @@ function AppLayout() {
 
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const activePath = useEditorStore((s) => s.activePath);
+  const taskRunSeq = useTaskStore((s) => s.taskRunSeq);
+  const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
 
   // File system events drive both the tree refresh and the editor handling of
   // files that changed outside the app.
@@ -153,6 +165,26 @@ function AppLayout() {
     setTerminalCollapsed(true);
   }, [workspacePath]);
 
+  // Tasks live entirely in the workspace: reset the task store and reload the
+  // task list whenever the workspace changes.
+  useEffect(() => {
+    useTaskStore.getState().reset();
+    if (workspacePath) void useTaskStore.getState().refresh();
+  }, [workspacePath]);
+
+  // Load the user configuration (keybindings) once. Defaults apply until then.
+  useEffect(() => {
+    void useConfigStore.getState().load();
+  }, []);
+
+  // A task run always reveals the terminal panel and focuses the task terminal.
+  useEffect(() => {
+    if (taskRunSeq === 0) return;
+    setTerminalCollapsed(false);
+    const { taskTerminalId } = useTaskStore.getState();
+    if (taskTerminalId != null) useTerminalStore.getState().select(taskTerminalId);
+  }, [taskRunSeq]);
+
   // Keep the tree in sync with the file that owns the active tab.
   useEffect(() => {
     if (!activePath) return;
@@ -172,52 +204,93 @@ function AppLayout() {
   }, []);
 
   useEffect(() => {
+    let lastCtrlPress = 0;
+    const DOUBLE_CTRL_WINDOW = 300;
+
+    const switchTabBy = (step: number, e: KeyboardEvent) => {
+      const store = useEditorStore.getState();
+      const { openFiles } = store;
+      if (openFiles.length < 2) return;
+      e.preventDefault();
+      const index = openFiles.findIndex((t) => t.path === store.activePath);
+      const next = openFiles[(index + step + openFiles.length) % openFiles.length];
+      if (next) store.setActive(next.path);
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useTaskStore.getState().taskCenterOpen) return;
+
+      const keybindings = useConfigStore.getState().keybindings;
+      const taskChord = keybindings.openTaskCenter;
+
+      // The default Task Center chord is the special double-Ctrl: two quick
+      // Ctrl presses. It is guarded so plain inputs never pop the picker.
+      if (isDoubleCtrlChord(taskChord)) {
+        if (e.key === "Control") {
+          if (e.repeat) return;
+          if (isTextInputFocused()) return;
+          const now = performance.now();
+          if (now - lastCtrlPress <= DOUBLE_CTRL_WINDOW) {
+            lastCtrlPress = 0;
+            useTaskStore.getState().toggleTaskCenter();
+          } else {
+            lastCtrlPress = now;
+          }
+          return;
+        }
+        // Anything else invalidates a pending single Ctrl.
+        lastCtrlPress = 0;
+      }
+
       const mod = e.ctrlKey || e.metaKey;
       if (!mod || e.altKey) return;
-      const key = e.key.toLowerCase();
 
-      if (!e.shiftKey && key === "b") {
+      const match = (action: KeybindingAction) =>
+        chordMatches(parseChord(keybindings[action]), e);
+
+      if (match("toggleExplorer")) {
         e.preventDefault();
         // Toggle the Explorer panel only; the Activity Bar stays visible.
         setExplorerCollapsed((value) => !value);
         return;
       }
-      if (e.code === "Backquote" && e.shiftKey) {
+      if (match("toggleTerminal")) {
+        e.preventDefault();
+        setTerminalCollapsed((value) => !value);
+        return;
+      }
+      if (match("newTerminal")) {
         if (isTextInputFocused()) return;
         e.preventDefault();
         setTerminalCollapsed(false);
         useTerminalStore.getState().create();
         return;
       }
-      if (!e.shiftKey && e.code === "Backquote") {
-        e.preventDefault();
-        setTerminalCollapsed((value) => !value);
-        return;
-      }
-      if (!e.shiftKey && key === "w") {
+      if (match("closeEditorTab")) {
         const store = useEditorStore.getState();
         if (!store.activePath) return;
         e.preventDefault();
         store.requestCloseTab(store.activePath);
         return;
       }
-      if (e.shiftKey && key === "t") {
+      if (match("restoreClosedTab")) {
         if (isTextInputFocused()) return;
         e.preventDefault();
         void useEditorStore.getState().restoreClosedTab();
         return;
       }
-      if (e.key === "Tab") {
-        const store = useEditorStore.getState();
-        const { openFiles } = store;
-        if (openFiles.length < 2) return;
+      if (match("openTaskCenter")) {
+        if (isTextInputFocused()) return;
         e.preventDefault();
-        const index = openFiles.findIndex((t) => t.path === store.activePath);
-        const step = e.shiftKey ? -1 : 1;
-        const next =
-          openFiles[(index + step + openFiles.length) % openFiles.length];
-        if (next) store.setActive(next.path);
+        useTaskStore.getState().toggleTaskCenter();
+        return;
+      }
+      if (match("nextEditorTab")) {
+        switchTabBy(1, e);
+        return;
+      }
+      if (match("previousEditorTab")) {
+        switchTabBy(-1, e);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -334,6 +407,9 @@ function AppLayout() {
         )}
       </div>
       <StatusBar />
+
+      {taskCenterOpen && <TaskCenter />}
+      <ToastStack />
 
       {closingDirtyNames && (
         <CloseConfirmDialog

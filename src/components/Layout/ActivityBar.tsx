@@ -1,3 +1,5 @@
+import { useTaskStore } from "../../stores/taskStore";
+
 function ExplorerIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
@@ -31,6 +33,10 @@ interface ActivityBarProps {
 }
 
 function ActivityBar({ explorerVisible, onToggleExplorer }: ActivityBarProps) {
+  const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
+  const taskRunning = useTaskStore((s) => s.taskStatus === "running");
+  const toggleTaskCenter = useTaskStore((s) => s.toggleTaskCenter);
+
   return (
     <nav className="activity-bar" aria-label="活动栏">
       <button
@@ -43,12 +49,13 @@ function ActivityBar({ explorerVisible, onToggleExplorer }: ActivityBarProps) {
       >
         <ExplorerIcon />
       </button>
-      {/* UI entry only; the Tasks feature is not implemented yet. */}
       <button
         type="button"
-        className="activity-bar-button"
-        title="任务（下一阶段实现）"
-        onClick={() => undefined}
+        className={
+          taskCenterOpen ? "activity-bar-button active" : "activity-bar-button"
+        }
+        title={taskRunning ? "任务（运行中）" : "任务"}
+        onClick={toggleTaskCenter}
       >
         <TasksIcon />
       </button>

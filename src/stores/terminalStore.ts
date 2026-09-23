@@ -6,6 +6,8 @@ export interface TerminalRecord {
   id: number;
   name: string;
   exited: boolean;
+  /** "task" terminals are pinned/reused by the Tasks feature. */
+  kind?: "normal" | "task";
 }
 
 interface TerminalStore {
@@ -13,7 +15,7 @@ interface TerminalStore {
   activeId: number | null;
   /** Next id to hand out; ids are counters, not reused after closing. */
   nextId: number;
-  create: () => number;
+  create: (kind?: "normal" | "task") => number;
   close: (id: number) => void;
   select: (id: number) => void;
   markExited: (id: number) => void;
@@ -26,10 +28,18 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   activeId: null,
   nextId: 1,
 
-  create: () => {
+  create: (kind = "normal") => {
     const id = get().nextId;
     set((s) => ({
-      terminals: [...s.terminals, { id, name: `终端 ${id}`, exited: false }],
+      terminals: [
+        ...s.terminals,
+        {
+          id,
+          name: kind === "task" ? "任务" : `终端 ${id}`,
+          exited: false,
+          kind,
+        },
+      ],
       activeId: id,
       nextId: s.nextId + 1,
     }));

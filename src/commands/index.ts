@@ -71,3 +71,26 @@ export function terminalKill(id: number): Promise<void> {
 export function terminalKillAll(): Promise<void> {
   return invoke<void>("terminal_kill_all");
 }
+
+export interface TaskSpec {
+  name: string;
+  command: string;
+}
+
+/**
+ * Tasks defined in `.lite-ide/tasks.json`, or null when there is no workspace
+ * or no task file. Errors are surfaced by the backend as rejected promises.
+ */
+export function loadWorkspaceTasks(): Promise<TaskSpec[] | null> {
+  return invoke<TaskSpec[] | null>("load_workspace_tasks");
+}
+
+export interface UserConfig {
+  keybindings: Record<string, string>;
+  notice: string | null;
+}
+
+/** The user configuration bundled with the defaults; always resolves. */
+export function getUserConfig(): Promise<UserConfig> {
+  return invoke<UserConfig>("get_user_config");
+}
