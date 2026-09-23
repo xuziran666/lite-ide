@@ -43,6 +43,27 @@ function relativeDir(workspace: string, file: string): string {
 }
 
 /**
+ * A Windows extended-length path prefix produced by `fs::canonicalize` on the
+ * backend. Shell tools like MinGW `g++` do not understand it, so the absolute
+ * path variables are normalized before the command is expanded. Only the value
+ * that ends up in the shell command is touched - the workspace's canonical
+ * path and the file-system safety logic are left untouched.
+ */
+export function normalizeTaskPath(path: string): string {
+  const UNC_PREFIX = "\\\\?\\UNC\\";
+  if (path.startsWith(UNC_PREFIX)) {
+    // \\?\UNC\server\share\project -> \\server\share\project
+    return "\\\\" + path.slice(UNC_PREFIX.length);
+  }
+  const EXT_PREFIX = "\\\\?\\";
+  if (path.startsWith(EXT_PREFIX)) {
+    // \\?\E:\Code\... -> E:\Code\...
+    return path.slice(EXT_PREFIX.length);
+  }
+  return path;
+}
+
+/**
  * Resolve the substitution variables in a task command. The `file` variables
  * are left untouched when there is no active file; callers should check
  * `needsActiveFile` first and refuse to run without one.
@@ -57,18 +78,19 @@ export function resolveTaskCommand(
   return command.replace(/\$\{([a-zA-Z]+)}/g, (match, name: string) => {
     switch (name) {
       case "workspaceFolder":
-        return workspacePath;
+        return normalizeTaskPath(workspacePath);
       case "workspaceFolderBasename":
         return workspaceFolderBasename;
       case "file":
-        return filePath ?? match;
+        return filePath ? normalizeTaskPath(filePath) : match;
       case "fileBasename":
         return filePath ? basename(filePath) : match;
       case "fileBasenameNoExtension":
         return filePath ? basenameNoExtension(filePath) : match;
       case "fileDirname":
-        return filePath ? dirname(filePath) : match;
+        return filePath ? normalizeTaskPath(dirname(filePath)) : match;
       case "relativeFile":
+        // Already relative, forward slashes, never carries the extended prefix.
         return filePath ? relativePath(workspacePath, filePath) : match;
       case "relativeFileDirname":
         return filePath ? relativeDir(workspacePath, filePath) : match;
