@@ -11,36 +11,71 @@ export function dirname(path: string): string {
   return out || path;
 }
 
-export function languageForPath(path: string): string {
-  const dot = path.lastIndexOf(".");
-  if (dot < 0) return "plaintext";
-  const ext = path.slice(dot + 1).toLowerCase();
-  switch (ext) {
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return "javascript";
-    case "ts":
-    case "tsx":
-    case "mts":
-    case "cts":
-      return "typescript";
-    case "html":
-    case "htm":
-      return "html";
-    case "css":
-      return "css";
-    case "scss":
-      return "scss";
-    case "json":
-      return "json";
-    case "md":
-    case "markdown":
-      return "markdown";
-    case "rs":
-      return "rust";
-    default:
-      return "plaintext";
+const extensionLanguageMap: Record<string, string> = {
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  html: "html",
+  htm: "html",
+  css: "css",
+  scss: "scss",
+  json: "json",
+  md: "markdown",
+  markdown: "markdown",
+  rs: "rust",
+  c: "c",
+  h: "c",
+  cc: "cpp",
+  cpp: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  hxx: "cpp",
+  hh: "cpp",
+  py: "python",
+  pyw: "python",
+  java: "java",
+  kt: "kotlin",
+  kts: "kotlin",
+  go: "go",
+  cs: "csharp",
+  php: "php",
+  rb: "ruby",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  fish: "shell",
+  ps1: "powershell",
+  psm1: "powershell",
+  psd1: "powershell",
+  sql: "sql",
+  yaml: "yaml",
+  yml: "yaml",
+  xml: "xml",
+  toml: "ini",
+  ini: "ini",
+};
+
+function filenameLanguage(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  if (lower === "dockerfile" || lower.startsWith("dockerfile.")) {
+    return "dockerfile";
   }
+  return undefined;
+}
+
+export function languageForPath(path: string): string {
+  const name = basename(path);
+  const byFilename = filenameLanguage(name);
+  if (byFilename) {
+    return byFilename;
+  }
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "plaintext";
+  const ext = name.slice(dot + 1).toLowerCase();
+  return extensionLanguageMap[ext] ?? "plaintext";
 }
