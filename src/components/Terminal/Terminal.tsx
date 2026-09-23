@@ -102,6 +102,29 @@ function usePtySession(id: number, active: boolean) {
     termRef.current = term;
     fitRef.current = fit;
 
+    // JetBrains-style Ctrl+C: with a selection copy it and swallow the event
+    // (nothing reaches the PTY); without a selection fall through to xterm's
+    // default handling, which sends \x03 to interrupt the current command.
+    term.attachCustomKeyEventHandler((event) => {
+      if (
+        event.type === "keydown" &&
+        event.key === "c" &&
+        event.ctrlKey &&
+        !event.shiftKey &&
+        !event.altKey &&
+        !event.metaKey
+      ) {
+        if (term.hasSelection()) {
+          const selection = term.getSelection();
+          if (selection) {
+            void navigator.clipboard.writeText(selection).catch(() => undefined);
+          }
+          return false;
+        }
+      }
+      return true;
+    });
+
     const version = ++versionRef.current;
 
     const channel = new Channel<Uint8Array>();
