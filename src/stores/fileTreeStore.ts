@@ -7,8 +7,13 @@ import {
   listDir,
   renameEntry as renameEntryCommand,
 } from "../commands";
-import { basename, dirname } from "../utils/language";
+import { basename, dirname, joinPath } from "../utils/language";
 import { useEditorStore } from "./editorStore";
+
+// Directories that are never auto-expanded when revealing the active file,
+// mirroring VS Code's `explorer.autoRevealExclude`. Files inside them are still
+// highlighted when already visible, and manual expansion is unaffected.
+const AUTO_REVEAL_SKIP = ["node_modules"];
 
 function nodeFromEntry(entry: DirEntry): TreeNode {
   return {
@@ -67,6 +72,7 @@ interface FileTreeStore {
   loadChildren: (path: string) => Promise<void>;
   refreshPath: (path: string) => Promise<void>;
   onFileSystemChanged: (paths: string[]) => Promise<void>;
+  revealPath: (path: string) => Promise<void>;
   createFile: (parent: string, name: string) => Promise<boolean>;
   createDir: (parent: string, name: string) => Promise<boolean>;
   renameEntry: (path: string, newName: string) => Promise<boolean>;
@@ -194,6 +200,42 @@ export const useFileTreeStore = create<FileTreeStore>((set, get) => ({
     if (!root) return;
     for (const p of paths) {
       await get().refreshPath(p);
+    }
+  },
+
+  // Select `path` in the tree, expanding and lazily loading its ancestors so a
+  // file opened from a tab becomes visible. Whether the tree itself is collapsed
+  // is left untouched.
+  revealPath: async (path: string) => {
+    const root = get().root;
+    if (!root || path === root.path || !path.startsWith(root.path)) return;
+
+    set({ selectedPath: path });
+    if (findNode(root, path)) return;
+
+    const segments = path
+      .slice(root.path.length)
+      .split(/[\\/]/)
+      .filter(Boolean);
+    segments.pop();
+
+    // Opening e.g. node_modules/pkg/dist/index.js must not unfold the whole
+    // dependency chain; the tab still opens and the file gets highlighted once
+    // its parent directory is expanded by hand.
+    if (segments.some((segment) => AUTO_REVEAL_SKIP.includes(segment))) return;
+
+    let current = root.path;
+    for (const segment of segments) {
+      current = joinPath(current, segment);
+      const tree = get().root;
+      if (!tree) return;
+      const node = findNode(tree, current);
+      if (!node || node.kind !== "dir") return;
+      if (!node.expanded) {
+        await get().toggleDir(current);
+      } else if (!node.loaded) {
+        await get().loadChildren(current);
+      }
     }
   },
 

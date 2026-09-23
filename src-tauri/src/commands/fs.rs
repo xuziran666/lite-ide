@@ -14,7 +14,13 @@ pub struct Entry {
     pub is_dir: bool,
 }
 
-/// Directory names that are hidden from the file tree and file-system events.
+/// Directory names hidden from the file tree.
+const HIDDEN_DIRS: &[&str] = &[".git", "target", "dist", "build", ".cache"];
+
+/// Directory names whose file-system events the watcher drops. A build or a
+/// dependency install can touch tens of thousands of files under these folders,
+/// which would otherwise flood the UI with refresh work. `node_modules` stays in
+/// this list but is no longer hidden, so the tree can still show it.
 pub(crate) const IGNORED_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "dist", "build", ".cache",
 ];
@@ -23,6 +29,12 @@ fn no_workspace_error() -> String {
     "No workspace is open. Please open a folder first.".to_string()
 }
 
+/// Whether a directory name is hidden from the file tree.
+fn is_hidden_name(name: &str) -> bool {
+    HIDDEN_DIRS.iter().any(|d| *d == name)
+}
+
+/// Whether a directory name is dropped by the file-system watcher.
 fn is_ignored_name(name: &str) -> bool {
     IGNORED_DIRS.iter().any(|d| *d == name)
 }
@@ -135,7 +147,7 @@ fn do_list_dir(workspace: &Path, path: &str) -> Result<Vec<Entry>, String> {
     for item in read_dir {
         let item = item.map_err(|e| io_error("read directory entry", e))?;
         let file_name = item.file_name();
-        if is_ignored_name(&file_name.to_string_lossy()) {
+        if is_hidden_name(&file_name.to_string_lossy()) {
             continue;
         }
         let file_type = item
@@ -300,8 +312,28 @@ pub fn set_workspace(
         return Err(format!("Not a directory: {}", requested.display()));
     }
     let canonical = fs::canonicalize(&requested).map_err(|e| io_error("open workspace", e))?;
-    state.set_workspace(canonical.clone(), app)?;
+    state.set_workspace(canonical.clone(), app.clone())?;
+    // Remembering the workspace must never block opening it.
+    if let Err(err) = crate::session::save_workspace(&app, &canonical) {
+        eprintln!("could not persist the workspace: {err}");
+    }
     Ok(canonical.to_string_lossy().into_owned())
+}
+
+/// The workspace from the previous run, or `None` when there is nothing usable
+/// to restore (for example when the folder was deleted or moved in the meantime).
+#[tauri::command]
+pub fn get_last_workspace(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let Some(saved) = crate::session::load(&app).last_workspace else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(&saved);
+    if !path.is_dir() {
+        return Ok(None);
+    }
+    let canonical =
+        fs::canonicalize(&path).map_err(|e| io_error("resolve the remembered workspace", e))?;
+    Ok(Some(canonical.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -494,14 +526,35 @@ mod tests {
     }
 
     #[test]
-    fn list_dir_hides_ignored_directories() {
+    fn list_dir_hides_only_hidden_directories() {
         let ws = tmp_workspace();
         fs::create_dir(ws.join("node_modules")).unwrap();
         fs::create_dir(ws.join(".git")).unwrap();
         let entries = do_list_dir(&ws, "").unwrap();
-        assert!(entries.iter().all(|e| e.name != "node_modules"));
+        assert!(entries.iter().any(|e| e.name == "node_modules"));
         assert!(entries.iter().all(|e| e.name != ".git"));
         assert!(entries.iter().any(|e| e.name == "sub"));
+        let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn path_is_ignored_only_matches_noisy_directories() {
+        let ws = tmp_workspace();
+        for noisy in [
+            "node_modules/pkg/index.js",
+            ".git/objects/ab/cdef",
+            "target/debug/lib.rlib",
+            "dist/bundle.js",
+            "build/out.txt",
+            ".cache/data.bin",
+        ] {
+            let path = noisy
+                .split('/')
+                .fold(ws.clone(), |acc, segment| acc.join(segment));
+            assert!(path_is_ignored(&path), "{noisy} should be ignored");
+        }
+        assert!(!path_is_ignored(&ws.join("src").join("main.rs")));
+        assert!(!path_is_ignored(&ws.join("inside.txt")));
         let _ = fs::remove_dir_all(&ws);
     }
 }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Tab } from "../types";
+import type { CursorInfo, Tab } from "../types";
 import { readFile, writeFile } from "../commands";
 import * as modelStore from "../editor/modelStore";
 import { basename, languageForPath } from "../utils/language";
@@ -9,10 +9,18 @@ interface EditorStore {
   activePath: string | null;
   error: string | null;
   externalNotice: string[] | null;
+  /** Dirty tab waiting for a save/discard decision before it can be closed. */
+  pendingClosePath: string | null;
+  cursor: CursorInfo | null;
   openFile: (path: string) => Promise<void>;
   setActive: (path: string) => void;
   closeTab: (path: string) => void;
+  requestCloseTab: (path: string) => void;
+  confirmCloseTab: (saveChanges: boolean) => Promise<void>;
+  cancelCloseTab: () => void;
   save: (path?: string) => Promise<boolean>;
+  saveAll: () => Promise<boolean>;
+  setCursorInfo: (info: CursorInfo | null) => void;
   markDirty: (path: string, dirty: boolean) => void;
   applyRename: (path: string, newPath: string) => void;
   applyDelete: (path: string) => void;
@@ -27,6 +35,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   activePath: null,
   error: null,
   externalNotice: null,
+  pendingClosePath: null,
+  cursor: null,
 
   openFile: async (path: string) => {
     if (get().openFiles.some((t) => t.path === path)) {
@@ -82,7 +92,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const next = remaining[idx] ?? remaining[idx - 1] ?? null;
       active = next ? next.path : null;
     }
-    set({ openFiles: remaining, activePath: active, error: null });
+    set((s) => ({
+      openFiles: remaining,
+      activePath: active,
+      error: null,
+      pendingClosePath: s.pendingClosePath === path ? null : s.pendingClosePath,
+    }));
   },
 
   save: async (path?: string) => {
@@ -108,6 +123,41 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return false;
     }
   },
+
+  requestCloseTab: (path: string) => {
+    const tab = get().openFiles.find((t) => t.path === path);
+    if (!tab) return;
+    if (!tab.dirty) {
+      get().closeTab(path);
+      return;
+    }
+    set({ pendingClosePath: path });
+  },
+
+  cancelCloseTab: () => set({ pendingClosePath: null }),
+
+  confirmCloseTab: async (saveChanges: boolean) => {
+    const path = get().pendingClosePath;
+    if (!path) return;
+    if (saveChanges) {
+      const ok = await get().save(path);
+      // Keep the confirmation open when saving fails, so nothing is lost.
+      if (!ok) return;
+    }
+    get().closeTab(path);
+    set({ pendingClosePath: null });
+  },
+
+  saveAll: async () => {
+    for (const tab of get().openFiles) {
+      if (!tab.dirty) continue;
+      const ok = await get().save(tab.path);
+      if (!ok) return false;
+    }
+    return true;
+  },
+
+  setCursorInfo: (info: CursorInfo | null) => set({ cursor: info }),
 
   markDirty: (path: string, dirty: boolean) => {
     set((s) => ({
@@ -183,6 +233,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     for (const t of get().openFiles) {
       modelStore.disposeModel(t.path);
     }
-    set({ openFiles: [], activePath: null, error: null, externalNotice: null });
+    set({
+      openFiles: [],
+      activePath: null,
+      error: null,
+      externalNotice: null,
+      pendingClosePath: null,
+      cursor: null,
+    });
   },
 }));

@@ -11,6 +11,11 @@ export function dirname(path: string): string {
   return out || path;
 }
 
+export function joinPath(parent: string, name: string): string {
+  const sep = parent.includes("\\") ? "\\" : "/";
+  return parent.endsWith(sep) ? parent + name : parent + sep + name;
+}
+
 const extensionLanguageMap: Record<string, string> = {
   js: "javascript",
   jsx: "javascript",

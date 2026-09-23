@@ -1,5 +1,6 @@
 pub mod commands;
 mod error;
+mod session;
 mod state;
 mod terminal;
 mod watcher;
@@ -21,6 +22,7 @@ pub fn run() {
             commands::fs::delete_entry,
             commands::fs::set_workspace,
             commands::fs::get_workspace,
+            commands::fs::get_last_workspace,
             commands::terminal::terminal_spawn,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

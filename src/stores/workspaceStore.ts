@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getWorkspace, setWorkspace as setWorkspaceCommand } from "../commands";
+import { getLastWorkspace, setWorkspace as setWorkspaceCommand } from "../commands";
 import { useEditorStore } from "./editorStore";
 import { useFileTreeStore } from "./fileTreeStore";
 
@@ -18,7 +18,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   init: async () => {
     try {
-      const path = await getWorkspace();
+      const path = await getLastWorkspace();
       if (path) {
         await get().openWorkspace(path);
       }

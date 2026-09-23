@@ -29,7 +29,43 @@ function Editor() {
     });
     editorRef.current = editor;
 
+    const pushCursor = () => {
+      const model = editor.getModel();
+      const position = editor.getPosition();
+      if (!model || !position) {
+        useEditorStore.getState().setCursorInfo(null);
+        return;
+      }
+      const selection = editor.getSelection();
+      useEditorStore.getState().setCursorInfo({
+        line: position.lineNumber,
+        column: position.column,
+        selected: selection ? model.getValueLengthInRange(selection) : 0,
+      });
+    };
+
+    let lastPush = 0;
+    const pushCursorThrottled = () => {
+      const now = performance.now();
+      if (now - lastPush < 50) return;
+      lastPush = now;
+      pushCursor();
+    };
+
+    const subscriptions = [
+      editor.onDidChangeCursorPosition(pushCursorThrottled),
+      editor.onDidChangeCursorSelection(pushCursorThrottled),
+      editor.onDidChangeModel(() => {
+        // Bypass the throttle so switching files updates immediately.
+        lastPush = 0;
+        pushCursor();
+      }),
+    ];
+
     return () => {
+      for (const subscription of subscriptions) {
+        subscription.dispose();
+      }
       editor.dispose();
       editorRef.current = null;
     };

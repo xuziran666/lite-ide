@@ -23,3 +23,10 @@ export interface Tab {
   language: string;
   dirty: boolean;
 }
+
+/** Cursor and selection state reported by the active Monaco editor. */
+export interface CursorInfo {
+  line: number;
+  column: number;
+  selected: number;
+}

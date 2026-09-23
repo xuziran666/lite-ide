@@ -50,15 +50,8 @@ body,
   background-color: #252526;
 }
 
-.file-tree-rail {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #252526;
-  border-right: 1px solid #3c3c3c;
-}
+
+
 
 .rail-expand-btn {
   display: inline-flex;
@@ -731,4 +724,67 @@ body.layout-resizing-horizontal {
 
 .picker-card .error-text {
   margin-top: 16px;
+}
+/* --- Collapsed file tree, tab overflow and status bar --- */
+.main-area {
+  position: relative;
+}
+
+.rail-expand-btn.floating {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  z-index: 30;
+  width: 26px;
+  height: 29px;
+  justify-content: center;
+  border: 1px solid #454545;
+  background-color: #2d2d2d;
+}
+
+/* Leave room for the floating expand button above the tab strip. */
+.main-area.file-tree-collapsed .tabs-bar {
+  padding-left: 32px;
+}
+
+.tab {
+  flex: 0 0 auto;
+  max-width: 220px;
+}
+
+.tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tabs-bar {
+  scrollbar-width: thin;
+}
+
+.status-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 24px;
+  padding: 0 10px;
+  background-color: #252526;
+  border-top: 1px solid #3c3c3c;
+  color: #9d9d9d;
+  font-size: 12px;
+  user-select: none;
+}
+
+.status-item {
+  white-space: nowrap;
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+.status-dirty {
+  color: #e8a33d;
+  font-weight: 600;
 }

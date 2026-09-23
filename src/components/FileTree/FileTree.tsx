@@ -10,6 +10,14 @@ import ContextMenu, { type ContextMenuAction } from "./ContextMenu";
 import NameInputDialog from "./NameInputDialog";
 import ConfirmDialog from "./ConfirmDialog";
 
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // Clipboard access can be denied; copying is best effort.
+  }
+}
+
 interface MenuState {
   x: number;
   y: number;
@@ -62,6 +70,12 @@ function FileTree({ onCollapse }: FileTreeProps) {
     }
   }
 
+  function relativePath(path: string): string | null {
+    if (!workspacePath || path === workspacePath) return null;
+    if (!path.startsWith(workspacePath)) return null;
+    return path.slice(workspacePath.length).replace(/^[\\/]/, "");
+  }
+
   function buildActions(node: TreeNodeType): ContextMenuAction[] {
     const actions: ContextMenuAction[] = [];
     if (node.kind === "dir") {
@@ -77,6 +91,17 @@ function FileTree({ onCollapse }: FileTreeProps) {
       actions.push({
         label: "打开",
         onClick: () => void openFile(node.path),
+      });
+    }
+    actions.push({
+      label: "复制路径",
+      onClick: () => void copyText(node.path),
+    });
+    const relative = relativePath(node.path);
+    if (relative) {
+      actions.push({
+        label: "复制相对路径",
+        onClick: () => void copyText(relative),
       });
     }
     actions.push({ label: "重命名", onClick: () => setRenaming(node) });

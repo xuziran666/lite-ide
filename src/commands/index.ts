@@ -21,6 +21,14 @@ export function getWorkspace(): Promise<string | null> {
   return invoke<string | null>("get_workspace");
 }
 
+/**
+ * The workspace opened during the previous run, or null when there is nothing
+ * to restore (first run, or the folder was deleted or moved meanwhile).
+ */
+export function getLastWorkspace(): Promise<string | null> {
+  return invoke<string | null>("get_last_workspace");
+}
+
 export function createFile(parent: string, name: string): Promise<DirEntry> {
   return invoke<DirEntry>("create_file", { parent, name });
 }
