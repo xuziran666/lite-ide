@@ -71,7 +71,7 @@ function AppLayout() {
   }, []);
 
   const handleTerminalDrag = useCallback((delta: number) => {
-    setTerminalHeight((h) => clamp(h + delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
+    setTerminalHeight((h) => clamp(h - delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
   }, []);
 
   const collapseFileTree = useCallback(() => setFileTreeCollapsed(true), []);
