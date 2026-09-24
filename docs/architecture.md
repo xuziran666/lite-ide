@@ -1,6 +1,6 @@
 # lite-ide 架构说明
 
-> 版本 0.1.0 · 代码基线 `main@aa44218`
+> 版本 0.1.0 · 代码基线 `main@811fb21`
 
 ## 1. 技术栈与版本
 
@@ -16,13 +16,14 @@
 
 ```
 lite-ide/
-├── src/                        前端（54 个 ts/tsx，含 2 个类型声明 + 样式）
+├── src/                        前端（59 个 ts/tsx，含类型声明与样式）
 │   ├── commands/index.ts       全部 IPC 调用的唯一出口（28 个命令封装）
 │   ├── config/keybindings.ts   键位动作定义 / 解析 / 录制校验 / 双击 Ctrl 标记
 │   ├── components/
 │   │   ├── Layout/             AppLayout（骨架/快捷键/关窗保护/设置覆盖区/右侧栏）、ActivityBar、
-│   │   │                       TopBar（标题 + 右侧栏开关 + 任务中心）、StatusBar、RightSidebar、
-│   │   │                       WorkspacePicker、CloseConfirmDialog
+│   │   │                       TopBar（自定义标题栏：Logo + 品牌 + 工作区名 + 右侧栏开关 +
+│   │   │                       任务中心 + 最小化/最大化(还原)/关闭 + 拖拽区）、StatusBar、
+│   │   │                       RightSidebar、WorkspacePicker、CloseConfirmDialog
 │   │   ├── FileTree/           FileTree、TreeNode、ContextMenu、NameInputDialog、
 │   │   │                       ConfirmDialog、FileIcon、FolderIcon
 │   │   ├── Editor/             Editor（Monaco 实例）、Tabs（含未保存确认）
@@ -32,7 +33,7 @@ lite-ide/
 │   │   ├── References/         ReferencesPanel（查找引用结果）
 │   │   ├── Outline/            OutlinePanel（documentSymbol）
 │   │   ├── Problems/           ProblemsPanel（Monaco markers 聚合）
-│   │   ├── Settings/           SettingsView + General / Editor / Terminal / Tasks / Keyboard 五分区
+│   │   ├── Settings/           SettingsView + General / Editor / Files / Terminal / Tasks / Keyboard 六分区
 │   │   ├── Toast/              ToastStack（全局 Toast 栈）
 │   │   └── Splitter.tsx        可拖拽分隔条
 │   ├── editor/                 monacoSetup（worker 环境 + 关闭被 LSP 取代的 TS/JS worker 能力）、
@@ -45,8 +46,11 @@ lite-ide/
 │   ├── types/                  index.ts（DirEntry/TreeNode/Tab/CursorInfo）、monaco-internals.d.ts
 │   ├── utils/                  language.ts（basename/dirname/joinPath/语言映射）、
 │   │                           reveal.ts（openAndReveal：工作区内/外分流）、
+│   │                           pathIdentity.ts（canonicalPath/fileKey/sameFile/isPathInsideWorkspace，
+│   │                           路径同一性 + 工作区内判定，编辑器打开入口与「打开文件」共用）、
+│   │                           autoSave.ts（自动保存调度：延迟/失焦触发）、
 │   │                           taskVariables.ts（任务变量展开 + Windows 路径归一化）
-│   └── App.css                 全部样式（1546 行）
+│   └── App.css                 全部样式（1974 行，含 Phase 13.1 `--vo-*` 设计 Token 层）
 └── src-tauri/                  后端（23 个 Rust 文件 + 配置）
     ├── src/
     │   ├── lib.rs              插件与命令注册（28 个命令）
@@ -75,6 +79,8 @@ lite-ide/
     ├── capabilities/default.json  权限声明
     └── tauri.conf.json            窗口与打包配置
 ```
+
+仓库根另有 `.github/workflows/`：`ci.yml`（前端 `tsc + vite build` 与 Rust `cargo check`）、`release.yml`（`v*` 标签触发多平台 `tauri-action` 发布）。
 
 ## 3. 分层与数据流
 
@@ -252,7 +258,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | 文件 | 内容 | 读写入口 | 容错 |
 |---|---|---|---|
 | `session.json` | `{ "last_workspace": "…" }` | `set_workspace` 写；`get_last_workspace` 读 | 缺失/损坏/目录消失一律降级为 `null`，回退欢迎页 |
-| `user.json` | `keybindings` / `editor` / `terminal` / `general` / `lsp`（camelCase） | `config.rs` `load`/`save` | 缺失用默认值；损坏用默认值并 toast；未知键位动作忽略；值越界钳制、空 shell 回 `auto`、非法 `wordWrap` 归 `off`、`lsp` 空白命令/参数回退默认 |
+| `user.json` | `keybindings` / `editor` / `terminal` / `general` / `files` / `lsp`（camelCase） | `config.rs` `load`/`save` | 缺失用默认值；损坏用默认值并 toast；未知键位动作忽略；值越界钳制、`general.theme` 非法回 `dark`、`editor.theme` 非法回 `vs-dark`、空 shell 回 `auto`、非法 `wordWrap` 归 `off`、`lsp` 空白命令/参数回退默认 |
 | `tasks.json` | `{ "tasks": [{ "name", "command" }] }` | `load_tasks` 读；`write_global_file` 写（设置内编辑） | 缺失视为空列表；格式错误在任务中心显示「tasks.json 格式错误」 |
 
 工作区内另有一份**受管** `.clangd`（仅 C/C++ 且无 `compile_commands.json` 时生成，见 10.3），首行带标记，出现数据库时自动删除。
@@ -262,6 +268,9 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | 配置 | 热应用 | 新会话 | 下次启动 | 需手动重启 |
 |---|---|---|---|---|
 | 编辑器参数（字号/制表符/换行/缩略图） | ✅ | | | |
+| Monaco 配色主题（`editor.theme`） | ✅（`setTheme`） | | | |
+| 主题（`general.theme`：dark/light/system） | ✅（`<html data-theme>`） | | | |
+| 自动保存（`files.autoSave`） | ✅ | | | |
 | 键盘快捷键 | ✅ | | | |
 | 终端默认 shell | | ✅（spawn 时读取） | | |
 | `lsp`（命令/参数） | | ✅（语言服务启动时读取） | | |
@@ -290,18 +299,18 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 
 ## 15. Tauri 权限与窗口配置
 
-- 权限（`capabilities/default.json`）：`core:default`、`core:window:allow-destroy`（关窗确认后强制退出）、`core:window:allow-set-title`（标题跟随工作区）、`dialog:default`（目录选择）；
+- 权限（`capabilities/default.json`）：`core:default`、`core:window:allow-destroy`（关窗确认后强制退出）、`core:window:allow-set-title`（标题跟随工作区）、`core:window:allow-minimize` / `allow-toggle-maximize` / `allow-close` / `allow-start-dragging`（自定义标题栏的窗口控制与拖拽）、`dialog:default`（目录选择与「打开文件」）；
 - 终端复制使用 WebView 的 `navigator.clipboard`（标准 Web API），无需额外能力声明；事件监听（`listen`、`onCloseRequested`）依赖 `core:event:default` 中的 `allow-listen`；
-- 窗口（`tauri.conf.json`）：默认 `800×600`，最小 `720×480`，`beforeDevCommand` 为 `pnpm dev`，`frontendDist` 指向 `../dist`。
+- 窗口（`tauri.conf.json`）：**`decorations: false`**（去掉系统原生标题栏，由 `TopBar` 自绘 36px 自定义标题栏）、默认 `800×600`，最小 `720×480`，`bundle.icon` 引用 `icons/` 下由项目 Logo 生成的图标，`beforeDevCommand` 为 `pnpm dev`，`frontendDist` 指向 `../dist`。
 
-## 16. 测试覆盖（112 个 Rust 单测）
+## 16. 测试覆盖（116 个 Rust 单测，Windows 上运行 115 个）
 
 | 模块 | 数量 | 覆盖点 |
 |---|---|---|
 | `commands/fs.rs` | 21 | 路径归一化、工作区内/外目标校验、绝对路径与 `..` 逃逸、symlink 逃逸、名称合法性、文件与目录创建、重复创建、重命名与冲突、删除（含递归）、根目录保护、隐藏目录过滤、watcher 忽略判定、外部只读读取（绝对路径/穿越/目录/缺失/正常） |
 | `commands/search.rs` | 6 | 文件列举跳过隐藏目录、隐藏目录判定、明文搜索（含 `node_modules`）、大小写敏感、正则（含非法）、空查询拒绝 |
-| `commands/terminal.rs` | 4 | Windows 扩展长度路径（`\\?\`）与 UNC 前缀还原、普通路径保持不变 |
-| `config.rs` | 14 | 默认键位、键位合并/未知动作忽略、编辑器/终端/通用覆盖解析、缺失分区回退、越界钳制、空 shell 回退、`lsp` 默认/覆盖/空白回退、损坏/空 `user.json` 降级、camelCase 序列化键名 |
+| `commands/terminal.rs` | 5（含 1 个 `#[cfg(not(windows))]`） | Windows 扩展长度路径（`\\?\`）与 UNC 前缀还原、普通路径保持不变 |
+| `config.rs` | 17 | 默认键位、键位合并/未知动作忽略、编辑器/终端/通用覆盖解析、缺失分区回退、越界钳制、`general.theme`/`editor.theme` 白名单回退、空 shell 回退、`lsp` 默认/覆盖/空白回退、损坏/空 `user.json` 降级、camelCase 序列化键名 |
 | `tasks.rs` | 5 | 任务列表解析、空对象容错、非法 JSON、非对象根、缺 name/command 字段报错 |
 | `session.rs` | 4 | session 解析、损坏 JSON、空输入、缺失字段容错 |
 | `lsp/mod.rs` | 5 | 每语言默认命令与解析、root 解析（Rust 项目根 / C·TS 工作区根 / Cargo.toml 上溯 / 回退）、`initialize` 能力（含 `publishDiagnostics`） |
@@ -317,7 +326,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 
 ```bash
 cd src-tauri && cargo check     # Rust 类型检查
-cd src-tauri && cargo test      # Rust 单测（112 个）
+cd src-tauri && cargo test      # Rust 单测（116 个，Windows 运行 115 个）
 pnpm build                      # TypeScript 检查 + Vite 构建
 pnpm tauri dev                  # 启动开发环境
 ```

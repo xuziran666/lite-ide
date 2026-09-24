@@ -49,5 +49,13 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 阶段 11.2：多语言 LSP —— 同一通用客户端支持 clangd（C/C++）与 `typescript-language-server --stdio`（TS/JS）；单套 Monaco provider 按 model 语言分发，语言层仅描述 id / Monaco 语言 / 扩展名 / 命令 / 参数；`lsp` 用户配置节；关闭 Monaco TS/JS worker 中被 LSP 取代的重复能力。
 - 阶段 11.3：C/C++ 工具链发现 —— `compile_commands.json` 优先（clangd 原生发现 workspace 根与 `build/`，不覆盖其中的编译器/头文件/参数）；无数据库时用 PATH 中的 `g++`/`gcc` 作为 fallback（生成受管 `.clangd` + `--enable-config --query-driver`），不硬编码工具链/STL 路径，出现数据库时自动移除回退。
 - 阶段 12：LSP 增强 —— 查找引用（`Shift+F12`，结果入右侧栏「引用」）、重命名（`F2`，支持跨文件 WorkspaceEdit，工作区外拒绝）、签名帮助（`(`/`,` 自动触发）、代码操作/快速修复（`Ctrl+.`，含右键菜单，`workspace/executeCommand`）、格式化（`Shift+Alt+F`，文档与选区）；新增能力全部按服务器 `initialize` capabilities 门控，四组快捷键进入 `user.json` 键位体系。
+- 阶段 12.1：编辑器体验 —— 自动保存（After Delay / On Focus Change / On Window Change 三个独立触发条件，`Off` 与其它互斥，可设延迟）、`Ctrl/Cmd + 滚轮` 缩放字号、Monaco 配色主题（Light / Dark / High Contrast / High Contrast Light）可在设置中选择；设置页新增「文件」分区。
+- 阶段 13.1：设计 Token 与主题 —— 引入 `--vo-*` 设计 Token 层；支持 **暗色 / 亮色 / 跟随系统** 三态主题（写入 `<html data-theme>`，`system` 监听 `prefers-color-scheme`），Monaco / xterm 主题保持独立。
+- 阶段 13.2–13.6：UI 精修 —— 活动栏、资源管理器、编辑器标签栏、终端、状态栏、设置页、次级侧栏统一为紧凑、低噪声、细边界、低圆角的 IDE 视觉（无渐变 / 卡片 / 大阴影），统一 hover / active 与图标风格；活动栏「设置」图标修正为齿轮。
+- 阶段 13.5：自定义标题栏 —— 关闭系统原生装饰（`decorations:false`），自绘 最小化 / 最大化（还原）/ 关闭 与可拖拽区域；双击标题栏最大化 / 还原；窗口控制按钮与拖拽区互不吞并。
+- 阶段 13.7：品牌化 —— 以项目 Logo 生成全套 Tauri 应用图标（ico / icns / png / Windows Square），并在自定义标题栏显示 Logo。
+- 阶段 13.8：密度精修 —— 顶部栏高度 36px、资源管理器默认宽度 220px（min 180 / max 400）。
+- 资源管理器「打开文件」入口 —— 系统文件选择器；工作区内文件按普通可写标签打开，工作区外文件按只读外部标签打开；复用 path identity（`isPathInsideWorkspace` / `sameFile`）去重，已打开则激活、不产生重复标签。
+- 工程化 —— GitHub Actions：CI（前端 `tsc + vite build` 与 Rust `cargo check`）与 Release（多平台 `tauri-action`，`v*` 标签触发）。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
