@@ -103,7 +103,14 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
 // Switching workspace invalidates the cached file index and any reference
 // results. The terminal/explorer stores already reset in `openWorkspace`; doing
 // it here keeps Quick Open and Find References from offering stale data.
-useWorkspaceStore.subscribe(() => {
-  useSearchStore.getState().resetFiles();
-  useSearchStore.getState().clearReferences();
+//
+// Deferred: this module is imported during the early module cycle
+// (monacoSetup -> lsp/client -> searchStore), so `useWorkspaceStore` is still
+// being initialized when this file evaluates. A microtask runs after the whole
+// module graph has finished evaluating.
+queueMicrotask(() => {
+  useWorkspaceStore.subscribe(() => {
+    useSearchStore.getState().resetFiles();
+    useSearchStore.getState().clearReferences();
+  });
 });
