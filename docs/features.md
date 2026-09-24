@@ -69,7 +69,9 @@
 
 ## 5. 编辑器
 
-- **Monaco 配置**：字号（默认 14）、制表符大小（默认 2）、`wordWrap`（默认 off）、minimap（默认关）、配色主题（默认 `vs-dark`，可选 Light / High Contrast / High Contrast Light）均可在设置中调整，并在保存后**立即热应用到所有已打开编辑器**（`editor.updateOptions` / `monaco.editor.setTheme`）。
+- **Monaco 配置**：字体族（默认 `Consolas, 'Courier New', monospace`）、字体连字、字号（默认 14）、制表符大小（默认 2）、`wordWrap`（默认 off）、minimap（默认关）、行号（默认 on）、空白字符（默认 selection）、当前行高亮（默认 line）、缩进参考线（默认开）、代码折叠（默认开）、括号匹配（默认 near）、平滑滚动（默认关）、光标样式（默认 line）、光标闪烁（默认 blink）、配色主题（默认 `vs-dark`，可选 Light / High Contrast / High Contrast Light）均可在设置中调整，并在修改后**立即热应用到所有已打开编辑器**（`editor.updateOptions` / `monaco.editor.setTheme`）。
+- **按字段应用**：热应用是**按字段**下发的 —— 只有 `editor.theme` 变化才调用 `monaco.editor.setTheme`，其余字段各自通过 `editor.updateOptions({ 该字段 })` 单独更新，改一项不会重设主题或其它选项；全程不重建 Editor、不重建 Model，光标 / 选区 / 滚动位置 / 撤销栈 / LSP 会话均不受影响。
+- **显示配置的合法取值**（与 monaco-editor `IEditorOptions` 完全一致，非法值由后端回退默认）：`lineNumbers` on / off / relative；`renderWhitespace` none / boundary / selection / all / trailing；`renderLineHighlight` none / gutter / line / all；`matchBrackets` always / never / near；`cursorStyle` line / block / underline / line-thin / block-outline / underline-thin；`cursorBlinking` blink / smooth / phase / expand / solid；`guides.indentation` 布尔。
 - **缩放与自动保存**：`Ctrl/Cmd + 滚轮` 在编辑器内缩放字号（8–40，可在设置关闭）；自动保存支持「编辑停止后延迟保存」「编辑器失焦保存」「窗口失焦保存」三个独立触发条件（设置中开关与设延迟）。
 - **多标签**：点击切换、`×` 关闭、鼠标中键关闭、脏文件显示橙色圆点、标签保持固定宽度（超长省略）并支持滚轮横向滚动、激活标签自动滚入视野。
 - **保存**：`Ctrl/Cmd+S`；脏状态基于 Monaco `versionId` 与 `savedVersion` 比较（不是简单布尔标记），因此撤销回已保存内容时会自动取消脏标记。

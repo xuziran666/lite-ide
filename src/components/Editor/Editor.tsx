@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
+import type { EditorSettings } from "../../commands";
 import { useEditorStore } from "../../stores/editorStore";
 import { useConfigStore } from "../../stores/configStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
@@ -10,6 +11,76 @@ import {
   cancelAutoSave,
   scheduleAutoSave,
 } from "../../utils/autoSave";
+
+/** Exactly what `editor.updateOptions()` accepts: per-editor + global options. */
+type MonacoEditorOptions = monaco.editor.IEditorOptions &
+  monaco.editor.IGlobalEditorOptions;
+
+/** Every Monaco option mirrored from `editor.*` in user.json. */
+const MONACO_OPTION_KEYS = [
+  "fontFamily",
+  "fontSize",
+  "fontLigatures",
+  "tabSize",
+  "wordWrap",
+  "minimap",
+  "lineNumbers",
+  "renderWhitespace",
+  "renderLineHighlight",
+  "guides",
+  "folding",
+  "matchBrackets",
+  "smoothScrolling",
+  "cursorStyle",
+  "cursorBlinking",
+] as const;
+
+/** The full Monaco option set for one `editor` configuration. */
+function monacoOptions(editor: EditorSettings): MonacoEditorOptions {
+  return {
+    fontFamily: editor.fontFamily,
+    fontSize: editor.fontSize,
+    fontLigatures: editor.fontLigatures,
+    tabSize: editor.tabSize,
+    wordWrap: editor.wordWrap as "off" | "on" | "wordWrapColumn",
+    minimap: { enabled: editor.minimap },
+    lineNumbers: editor.lineNumbers,
+    renderWhitespace: editor.renderWhitespace,
+    renderLineHighlight: editor.renderLineHighlight,
+    guides: { indentation: editor.guides.indentation },
+    folding: editor.folding,
+    matchBrackets: editor.matchBrackets,
+    smoothScrolling: editor.smoothScrolling,
+    cursorStyle: editor.cursorStyle,
+    cursorBlinking: editor.cursorBlinking,
+  };
+}
+
+/**
+ * Only the options whose Monaco value actually changed, so a settings edit
+ * touches nothing else: editing `cursorStyle` must not re-apply the font, and
+ * the theme (handled separately with `setTheme`) is never part of this patch.
+ */
+function changedMonacoOptions(
+  prev: EditorSettings,
+  next: EditorSettings,
+): MonacoEditorOptions {
+  const before = monacoOptions(prev);
+  const after = monacoOptions(next);
+  const patch: Record<string, unknown> = {};
+  for (const key of MONACO_OPTION_KEYS) {
+    const same =
+      key === "minimap"
+        ? before.minimap?.enabled === after.minimap?.enabled
+        : key === "guides"
+          ? before.guides?.indentation === after.guides?.indentation
+          : Object.is(before[key], after[key]);
+    if (!same) {
+      patch[key] = after[key];
+    }
+  }
+  return patch as MonacoEditorOptions;
+}
 
 function Editor() {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -91,25 +162,39 @@ function Editor() {
   }, [activePath]);
 
   // Hot-apply the editor settings from the Settings page. This only touches
-  // display options; open models, tabs and cursor positions are preserved.
+  // display options; open models, tabs, undo history, cursors and scroll
+  // positions are preserved, and the editor itself is never recreated.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const apply = () => {
-      const s = useConfigStore.getState();
-      if (!s.loaded) return;
+
+    const applyAll = (state: ReturnType<typeof useConfigStore.getState>) => {
       // Theme is global in Monaco; set it once and every editor (current and
       // future) picks it up without recreating models/editors.
-      monaco.editor.setTheme(s.editor.theme);
-      editor.updateOptions({
-        fontSize: s.editor.fontSize,
-        tabSize: s.editor.tabSize,
-        wordWrap: s.editor.wordWrap as "off" | "on" | "wordWrapColumn",
-        minimap: { enabled: s.editor.minimap },
-      });
+      monaco.editor.setTheme(state.editor.theme);
+      editor.updateOptions(monacoOptions(state.editor));
     };
-    apply();
-    return useConfigStore.subscribe(apply);
+
+    const initial = useConfigStore.getState();
+    if (initial.loaded) applyAll(initial);
+
+    // Per-field application: only a theme change runs `setTheme` (which rebuilds
+    // token colors), and every other option is pushed on its own, so editing one
+    // setting never re-applies the rest.
+    return useConfigStore.subscribe((state, prev) => {
+      if (!state.loaded) return;
+      if (!prev.loaded) {
+        applyAll(state);
+        return;
+      }
+      if (state.editor.theme !== prev.editor.theme) {
+        monaco.editor.setTheme(state.editor.theme);
+      }
+      const patch = changedMonacoOptions(prev.editor, state.editor);
+      if (Object.keys(patch).length > 0) {
+        editor.updateOptions(patch);
+      }
+    });
   }, []);
 
   // Auto Save: the app window losing focus is one of the triggers.

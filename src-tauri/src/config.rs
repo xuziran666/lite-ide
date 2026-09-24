@@ -72,17 +72,48 @@ pub struct LspConfigFile {
     pub typescript: Option<LspServerFile>,
 }
 
+/// `editor.guides.*` in `user.json`, nested so more guide options can be added
+/// later without breaking stored files.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuidesConfigFile {
+    #[serde(default)]
+    pub indentation: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorConfigFile {
     #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default)]
     pub font_size: Option<u32>,
+    #[serde(default)]
+    pub font_ligatures: Option<bool>,
     #[serde(default)]
     pub tab_size: Option<u32>,
     #[serde(default)]
     pub word_wrap: Option<String>,
     #[serde(default)]
     pub minimap: Option<bool>,
+    #[serde(default)]
+    pub line_numbers: Option<String>,
+    #[serde(default)]
+    pub render_whitespace: Option<String>,
+    #[serde(default)]
+    pub render_line_highlight: Option<String>,
+    #[serde(default)]
+    pub guides: Option<GuidesConfigFile>,
+    #[serde(default)]
+    pub folding: Option<bool>,
+    #[serde(default)]
+    pub match_brackets: Option<String>,
+    #[serde(default)]
+    pub smooth_scrolling: Option<bool>,
+    #[serde(default)]
+    pub cursor_style: Option<String>,
+    #[serde(default)]
+    pub cursor_blinking: Option<String>,
     #[serde(default)]
     pub mouse_wheel_zoom: Option<bool>,
     #[serde(default)]
@@ -150,21 +181,56 @@ pub struct UserConfig {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorSettings {
+    pub font_family: String,
     pub font_size: u32,
+    pub font_ligatures: bool,
     pub tab_size: u32,
     pub word_wrap: String,
     pub minimap: bool,
+    pub line_numbers: String,
+    pub render_whitespace: String,
+    pub render_line_highlight: String,
+    pub guides: GuidesSettings,
+    pub folding: bool,
+    pub match_brackets: String,
+    pub smooth_scrolling: bool,
+    pub cursor_style: String,
+    pub cursor_blinking: String,
     pub mouse_wheel_zoom: bool,
     pub theme: String,
+}
+
+/// Resolved `editor.guides.*` values.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GuidesSettings {
+    pub indentation: bool,
+}
+
+impl Default for GuidesSettings {
+    fn default() -> Self {
+        Self { indentation: true }
+    }
 }
 
 impl Default for EditorSettings {
     fn default() -> Self {
         Self {
+            font_family: DEFAULT_FONT_FAMILY.to_string(),
             font_size: 14,
+            font_ligatures: false,
             tab_size: 2,
             word_wrap: "off".to_string(),
             minimap: false,
+            line_numbers: "on".to_string(),
+            render_whitespace: "selection".to_string(),
+            render_line_highlight: "line".to_string(),
+            guides: GuidesSettings::default(),
+            folding: true,
+            match_brackets: "near".to_string(),
+            smooth_scrolling: false,
+            cursor_style: "line".to_string(),
+            cursor_blinking: "blink".to_string(),
             mouse_wheel_zoom: false,
             theme: "vs-dark".to_string(),
         }
@@ -284,6 +350,29 @@ fn sanitize_word_wrap(value: &str) -> String {
     }
 }
 
+/// The fallback font stack when `editor.fontFamily` is missing or blank.
+const DEFAULT_FONT_FAMILY: &str = "Consolas, 'Courier New', monospace";
+
+/// Keep only values Monaco actually accepts; anything else falls back.
+fn sanitize_enum(value: &str, allowed: &[&str], fallback: &str) -> String {
+    if allowed.contains(&value) {
+        value.to_string()
+    } else {
+        fallback.to_string()
+    }
+}
+
+/// A blank font family would make the editor fall back to its own default
+/// silently, so store the documented default instead.
+fn sanitize_font_family(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        DEFAULT_FONT_FAMILY.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Whitelist the Monaco theme; anything unknown falls back to the default.
 fn sanitize_theme(value: &str) -> String {
     match value {
@@ -338,10 +427,56 @@ fn resolve_lsp(file: &LspConfigFile) -> LspSettings {
 /// Clamp and fill optional user file values before persisting them.
 fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
     let e = &mut file.editor;
+    e.font_family = Some(sanitize_font_family(
+        e.font_family.as_deref().unwrap_or(DEFAULT_FONT_FAMILY),
+    ));
     e.font_size = Some(e.font_size.unwrap_or(14).clamp(6, 64));
+    e.font_ligatures = Some(e.font_ligatures.unwrap_or(false));
     e.tab_size = Some(e.tab_size.unwrap_or(2).clamp(1, 16));
     e.word_wrap = Some(sanitize_word_wrap(e.word_wrap.as_deref().unwrap_or("off")));
     e.minimap = Some(e.minimap.unwrap_or(false));
+    e.line_numbers = Some(sanitize_enum(
+        e.line_numbers.as_deref().unwrap_or("on"),
+        &["on", "off", "relative"],
+        "on",
+    ));
+    e.render_whitespace = Some(sanitize_enum(
+        e.render_whitespace.as_deref().unwrap_or("selection"),
+        &["none", "boundary", "selection", "all", "trailing"],
+        "selection",
+    ));
+    e.render_line_highlight = Some(sanitize_enum(
+        e.render_line_highlight.as_deref().unwrap_or("line"),
+        &["none", "gutter", "line", "all"],
+        "line",
+    ));
+    e.guides = Some(GuidesConfigFile {
+        indentation: Some(e.guides.as_ref().and_then(|g| g.indentation).unwrap_or(true)),
+    });
+    e.folding = Some(e.folding.unwrap_or(true));
+    e.match_brackets = Some(sanitize_enum(
+        e.match_brackets.as_deref().unwrap_or("near"),
+        &["always", "never", "near"],
+        "near",
+    ));
+    e.smooth_scrolling = Some(e.smooth_scrolling.unwrap_or(false));
+    e.cursor_style = Some(sanitize_enum(
+        e.cursor_style.as_deref().unwrap_or("line"),
+        &[
+            "line",
+            "block",
+            "underline",
+            "line-thin",
+            "block-outline",
+            "underline-thin",
+        ],
+        "line",
+    ));
+    e.cursor_blinking = Some(sanitize_enum(
+        e.cursor_blinking.as_deref().unwrap_or("blink"),
+        &["blink", "smooth", "phase", "expand", "solid"],
+        "blink",
+    ));
     e.mouse_wheel_zoom = Some(e.mouse_wheel_zoom.unwrap_or(false));
     e.theme = Some(sanitize_theme(e.theme.as_deref().unwrap_or("vs-dark")));
 
@@ -404,10 +539,49 @@ fn parse_user_config(text: &str) -> UserConfig {
             UserConfig {
                 keybindings,
                 editor: EditorSettings {
+                    font_family: file
+                        .editor
+                        .font_family
+                        .unwrap_or_else(|| DEFAULT_FONT_FAMILY.to_string()),
                     font_size: file.editor.font_size.unwrap_or(14),
+                    font_ligatures: file.editor.font_ligatures.unwrap_or(false),
                     tab_size: file.editor.tab_size.unwrap_or(2),
                     word_wrap: file.editor.word_wrap.unwrap_or_else(|| "off".to_string()),
                     minimap: file.editor.minimap.unwrap_or(false),
+                    line_numbers: file
+                        .editor
+                        .line_numbers
+                        .unwrap_or_else(|| "on".to_string()),
+                    render_whitespace: file
+                        .editor
+                        .render_whitespace
+                        .unwrap_or_else(|| "selection".to_string()),
+                    render_line_highlight: file
+                        .editor
+                        .render_line_highlight
+                        .unwrap_or_else(|| "line".to_string()),
+                    guides: GuidesSettings {
+                        indentation: file
+                            .editor
+                            .guides
+                            .as_ref()
+                            .and_then(|g| g.indentation)
+                            .unwrap_or(true),
+                    },
+                    folding: file.editor.folding.unwrap_or(true),
+                    match_brackets: file
+                        .editor
+                        .match_brackets
+                        .unwrap_or_else(|| "near".to_string()),
+                    smooth_scrolling: file.editor.smooth_scrolling.unwrap_or(false),
+                    cursor_style: file
+                        .editor
+                        .cursor_style
+                        .unwrap_or_else(|| "line".to_string()),
+                    cursor_blinking: file
+                        .editor
+                        .cursor_blinking
+                        .unwrap_or_else(|| "blink".to_string()),
                     mouse_wheel_zoom: file.editor.mouse_wheel_zoom.unwrap_or(false),
                     theme: file.editor.theme.unwrap_or_else(|| "vs-dark".to_string()),
                 },
@@ -528,8 +702,8 @@ pub fn configured_shell(app: &AppHandle) -> String {
 mod tests {
     use super::{
         defaults, parse_user_config, sanitize_file, AutoSaveSettings, EditorSettings,
-        FilesSettings, GeneralSettings, LspSettings, TerminalSettings, UserConfig,
-        UserConfigFile,
+        FilesSettings, GeneralSettings, GuidesSettings, LspSettings, TerminalSettings, UserConfig,
+        UserConfigFile, DEFAULT_FONT_FAMILY,
     };
 
     #[test]
@@ -582,13 +756,24 @@ mod tests {
     #[test]
     fn parses_editor_terminal_and_general_overrides() {
         let cfg = parse_user_config(
-            r#"{"editor":{"fontSize":18,"tabSize":4,"wordWrap":"on","minimap":true},"terminal":{"defaultShell":"cmd.exe"},"general":{"restoreLastWorkspace":false,"confirmBeforeClose":false}}"#,
+            r#"{"editor":{"fontFamily":"Fira Code, monospace","fontSize":18,"fontLigatures":true,"tabSize":4,"wordWrap":"on","minimap":true,"lineNumbers":"relative","renderWhitespace":"all","renderLineHighlight":"gutter","guides":{"indentation":false},"folding":false,"matchBrackets":"always","smoothScrolling":true,"cursorStyle":"block","cursorBlinking":"smooth"},"terminal":{"defaultShell":"cmd.exe"},"general":{"restoreLastWorkspace":false,"confirmBeforeClose":false}}"#,
         );
         assert_eq!(cfg.notice, None);
+        assert_eq!(cfg.editor.font_family, "Fira Code, monospace");
         assert_eq!(cfg.editor.font_size, 18);
+        assert!(cfg.editor.font_ligatures);
         assert_eq!(cfg.editor.tab_size, 4);
         assert_eq!(cfg.editor.word_wrap, "on");
         assert!(cfg.editor.minimap);
+        assert_eq!(cfg.editor.line_numbers, "relative");
+        assert_eq!(cfg.editor.render_whitespace, "all");
+        assert_eq!(cfg.editor.render_line_highlight, "gutter");
+        assert!(!cfg.editor.guides.indentation);
+        assert!(!cfg.editor.folding);
+        assert_eq!(cfg.editor.match_brackets, "always");
+        assert!(cfg.editor.smooth_scrolling);
+        assert_eq!(cfg.editor.cursor_style, "block");
+        assert_eq!(cfg.editor.cursor_blinking, "smooth");
         assert_eq!(cfg.terminal.default_shell, "cmd.exe");
         assert!(!cfg.general.restore_last_workspace);
         assert!(!cfg.general.confirm_before_close);
@@ -615,6 +800,17 @@ mod tests {
         assert!(!cfg.editor.minimap);
         assert!(!cfg.editor.mouse_wheel_zoom);
         assert_eq!(cfg.editor.theme, "vs-dark");
+        assert_eq!(cfg.editor.font_family, DEFAULT_FONT_FAMILY);
+        assert!(!cfg.editor.font_ligatures);
+        assert_eq!(cfg.editor.line_numbers, "on");
+        assert_eq!(cfg.editor.render_whitespace, "selection");
+        assert_eq!(cfg.editor.render_line_highlight, "line");
+        assert!(cfg.editor.guides.indentation);
+        assert!(cfg.editor.folding);
+        assert_eq!(cfg.editor.match_brackets, "near");
+        assert!(!cfg.editor.smooth_scrolling);
+        assert_eq!(cfg.editor.cursor_style, "line");
+        assert_eq!(cfg.editor.cursor_blinking, "blink");
         assert_eq!(cfg.terminal.default_shell, "auto");
         assert!(cfg.general.restore_last_workspace);
         assert!(cfg.general.confirm_before_close);
@@ -671,6 +867,20 @@ mod tests {
         assert_eq!(file.editor.minimap, Some(false));
         assert_eq!(file.editor.mouse_wheel_zoom, Some(false));
         assert_eq!(file.editor.theme.as_deref(), Some("vs-dark"));
+        assert_eq!(file.editor.font_family.as_deref(), Some(DEFAULT_FONT_FAMILY));
+        assert_eq!(file.editor.font_ligatures, Some(false));
+        assert_eq!(file.editor.line_numbers.as_deref(), Some("on"));
+        assert_eq!(file.editor.render_whitespace.as_deref(), Some("selection"));
+        assert_eq!(file.editor.render_line_highlight.as_deref(), Some("line"));
+        assert_eq!(
+            file.editor.guides.as_ref().and_then(|g| g.indentation),
+            Some(true)
+        );
+        assert_eq!(file.editor.folding, Some(true));
+        assert_eq!(file.editor.match_brackets.as_deref(), Some("near"));
+        assert_eq!(file.editor.smooth_scrolling, Some(false));
+        assert_eq!(file.editor.cursor_style.as_deref(), Some("line"));
+        assert_eq!(file.editor.cursor_blinking.as_deref(), Some("blink"));
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
@@ -754,10 +964,21 @@ mod tests {
         let cfg = UserConfig {
             keybindings: defaults(),
             editor: EditorSettings {
+                font_family: "Fira Code, monospace".to_string(),
                 font_size: 18,
+                font_ligatures: true,
                 tab_size: 4,
                 word_wrap: "on".to_string(),
                 minimap: true,
+                line_numbers: "relative".to_string(),
+                render_whitespace: "all".to_string(),
+                render_line_highlight: "gutter".to_string(),
+                guides: GuidesSettings { indentation: false },
+                folding: false,
+                match_brackets: "always".to_string(),
+                smooth_scrolling: true,
+                cursor_style: "block".to_string(),
+                cursor_blinking: "smooth".to_string(),
                 mouse_wheel_zoom: true,
                 theme: "hc-black".to_string(),
             },
@@ -786,7 +1007,21 @@ mod tests {
         // silently dropped (which broke "打开 tasks.json").
         assert!(text.contains(r#""configDir":"#), "{text}");
         assert!(text.contains(r#""fontSize":18"#), "{text}");
+        assert!(
+            text.contains(r#""fontFamily":"Fira Code, monospace","fontSize":18"#),
+            "{text}"
+        );
+        assert!(text.contains(r#""fontLigatures":true"#), "{text}");
         assert!(text.contains(r#""tabSize":4"#), "{text}");
+        assert!(text.contains(r#""lineNumbers":"relative""#), "{text}");
+        assert!(text.contains(r#""renderWhitespace":"all""#), "{text}");
+        assert!(text.contains(r#""renderLineHighlight":"gutter""#), "{text}");
+        assert!(text.contains(r#""guides":{"indentation":false}"#), "{text}");
+        assert!(text.contains(r#""folding":false"#), "{text}");
+        assert!(text.contains(r#""matchBrackets":"always""#), "{text}");
+        assert!(text.contains(r#""smoothScrolling":true"#), "{text}");
+        assert!(text.contains(r#""cursorStyle":"block""#), "{text}");
+        assert!(text.contains(r#""cursorBlinking":"smooth""#), "{text}");
         assert!(text.contains(r#""wordWrap":"on""#), "{text}");
         assert!(text.contains(r#""minimap":true"#), "{text}");
         assert!(text.contains(r#""mouseWheelZoom":true"#), "{text}");
@@ -800,5 +1035,54 @@ mod tests {
         assert!(!text.contains("config_dir"), "{text}");
         assert!(!text.contains("font_size"), "{text}");
         assert!(!text.contains("mouse_wheel_zoom"), "{text}");
+        assert!(!text.contains("font_family"), "{text}");
+        assert!(!text.contains("line_numbers"), "{text}");
+        assert!(!text.contains("render_whitespace"), "{text}");
+        assert!(!text.contains("render_line_highlight"), "{text}");
+        assert!(!text.contains("match_brackets"), "{text}");
+        assert!(!text.contains("smooth_scrolling"), "{text}");
+        assert!(!text.contains("cursor_style"), "{text}");
+        assert!(!text.contains("cursor_blinking"), "{text}");
+    }
+
+    #[test]
+    fn parses_editor_display_section() {
+        let cfg = parse_user_config(
+            r#"{"editor":{"lineNumbers":"off","renderWhitespace":"trailing","renderLineHighlight":"none","guides":{"indentation":true},"folding":true,"matchBrackets":"never","smoothScrolling":false,"cursorStyle":"underline-thin","cursorBlinking":"phase"}}"#,
+        );
+        assert_eq!(cfg.editor.line_numbers, "off");
+        assert_eq!(cfg.editor.render_whitespace, "trailing");
+        assert_eq!(cfg.editor.render_line_highlight, "none");
+        assert!(cfg.editor.guides.indentation);
+        assert!(cfg.editor.folding);
+        assert_eq!(cfg.editor.match_brackets, "never");
+        assert!(!cfg.editor.smooth_scrolling);
+        assert_eq!(cfg.editor.cursor_style, "underline-thin");
+        assert_eq!(cfg.editor.cursor_blinking, "phase");
+    }
+
+    #[test]
+    fn sanitizes_unknown_editor_display_values() {
+        let cfg = parse_user_config(
+            r#"{"editor":{"lineNumbers":"bogus","renderWhitespace":"bogus","renderLineHighlight":"bogus","matchBrackets":"bogus","cursorStyle":"bogus","cursorBlinking":"bogus"}}"#,
+        );
+        assert_eq!(cfg.editor.line_numbers, "on");
+        assert_eq!(cfg.editor.render_whitespace, "selection");
+        assert_eq!(cfg.editor.render_line_highlight, "line");
+        assert_eq!(cfg.editor.match_brackets, "near");
+        assert_eq!(cfg.editor.cursor_style, "line");
+        assert_eq!(cfg.editor.cursor_blinking, "blink");
+        // The guides section is optional and defaults to enabled.
+        assert!(cfg.editor.guides.indentation);
+    }
+
+    #[test]
+    fn blank_font_family_falls_back_to_default() {
+        let blank = parse_user_config(r#"{"editor":{"fontFamily":""}}"#);
+        assert_eq!(blank.editor.font_family, DEFAULT_FONT_FAMILY);
+        let spaces = parse_user_config(r#"{"editor":{"fontFamily":"   "}}"#);
+        assert_eq!(spaces.editor.font_family, DEFAULT_FONT_FAMILY);
+        let kept = parse_user_config(r#"{"editor":{"fontFamily":"  JetBrains Mono  "}}"#);
+        assert_eq!(kept.editor.font_family, "JetBrains Mono");
     }
 }

@@ -96,11 +96,38 @@ export function loadTasks(): Promise<TaskSpec[] | null> {
   return invoke<TaskSpec[] | null>("load_tasks");
 }
 
+/** `editor.guides.*`: nested so more guide options can be added later. */
+export interface EditorGuidesSettings {
+  indentation: boolean;
+}
+
+/**
+ * Monaco options mirrored from `user.json`. Every value is a union of what
+ * Monaco itself accepts (monaco-editor 0.56 `IEditorOptions`), so the settings
+ * file can never carry a value the editor cannot apply.
+ */
 export interface EditorSettings {
+  fontFamily: string;
   fontSize: number;
+  fontLigatures: boolean;
   tabSize: number;
   wordWrap: string;
   minimap: boolean;
+  lineNumbers: "on" | "off" | "relative";
+  renderWhitespace: "none" | "boundary" | "selection" | "all" | "trailing";
+  renderLineHighlight: "none" | "gutter" | "line" | "all";
+  guides: EditorGuidesSettings;
+  folding: boolean;
+  matchBrackets: "always" | "never" | "near";
+  smoothScrolling: boolean;
+  cursorStyle:
+    | "line"
+    | "block"
+    | "underline"
+    | "line-thin"
+    | "block-outline"
+    | "underline-thin";
+  cursorBlinking: "blink" | "smooth" | "phase" | "expand" | "solid";
   mouseWheelZoom: boolean;
   theme: string;
 }

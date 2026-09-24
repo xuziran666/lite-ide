@@ -1,3 +1,4 @@
+import type { EditorSettings } from "../../commands";
 import { useConfigStore } from "../../stores/configStore";
 
 function NumberField({
@@ -28,6 +29,110 @@ function NumberField({
         min={min}
         max={max}
         onChange={(e) => handleChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
+interface Option<T extends string> {
+  value: T;
+  label: string;
+}
+
+const LINE_NUMBERS: Option<EditorSettings["lineNumbers"]>[] = [
+  { value: "on", label: "开启" },
+  { value: "off", label: "关闭" },
+  { value: "relative", label: "相对" },
+];
+
+const RENDER_WHITESPACE: Option<EditorSettings["renderWhitespace"]>[] = [
+  { value: "none", label: "不显示" },
+  { value: "boundary", label: "边界" },
+  { value: "selection", label: "选区" },
+  { value: "all", label: "全部" },
+  { value: "trailing", label: "行尾" },
+];
+
+const RENDER_LINE_HIGHLIGHT: Option<EditorSettings["renderLineHighlight"]>[] = [
+  { value: "none", label: "关闭" },
+  { value: "gutter", label: "行号槽" },
+  { value: "line", label: "整行" },
+  { value: "all", label: "行号槽与整行" },
+];
+
+const MATCH_BRACKETS: Option<EditorSettings["matchBrackets"]>[] = [
+  { value: "always", label: "始终" },
+  { value: "never", label: "从不" },
+  { value: "near", label: "邻近" },
+];
+
+const CURSOR_STYLE: Option<EditorSettings["cursorStyle"]>[] = [
+  { value: "line", label: "竖线" },
+  { value: "block", label: "方块" },
+  { value: "underline", label: "下划线" },
+  { value: "line-thin", label: "细竖线" },
+  { value: "block-outline", label: "空心方块" },
+  { value: "underline-thin", label: "细下划线" },
+];
+
+const CURSOR_BLINKING: Option<EditorSettings["cursorBlinking"]>[] = [
+  { value: "blink", label: "Blink" },
+  { value: "smooth", label: "Smooth" },
+  { value: "phase", label: "Phase" },
+  { value: "expand", label: "Expand" },
+  { value: "solid", label: "Solid" },
+];
+
+function SelectField<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Option<T>[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <label className="settings-field settings-row">
+      <span className="settings-label">{label}</span>
+      <select
+        className="settings-select"
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function CheckField({
+  label,
+  detail,
+  checked,
+  onChange,
+}: {
+  label: string;
+  detail: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-field settings-check">
+      <span className="settings-check-text">
+        <span className="settings-label">{label}</span>
+        <span className="settings-detail">{detail}</span>
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
       />
     </label>
   );
@@ -78,32 +183,97 @@ function EditorSection() {
           <option value="hc-light">High Contrast Light</option>
         </select>
       </label>
-      <label className="settings-field settings-check">
-        <span className="settings-check-text">
-          <span className="settings-label">显示缩略图</span>
-          <span className="settings-detail">在右侧显示代码概览缩略图。</span>
-        </span>
+      <CheckField
+        label="显示缩略图"
+        detail="在右侧显示代码概览缩略图。"
+        checked={editor.minimap}
+        onChange={(minimap) => void updateEditor({ minimap })}
+      />
+      <CheckField
+        label="Ctrl + 滚轮缩放"
+        detail="按住 Ctrl（macOS 为 Cmd）滚动鼠标滚轮时调整编辑器字号（8–40）。"
+        checked={editor.mouseWheelZoom}
+        onChange={(mouseWheelZoom) => void updateEditor({ mouseWheelZoom })}
+      />
+
+      <div className="settings-group-title">字体</div>
+      <label className="settings-field settings-row">
+        <span className="settings-label">字体族</span>
         <input
-          type="checkbox"
-          checked={editor.minimap}
-          onChange={(e) => void updateEditor({ minimap: e.target.checked })}
+          type="text"
+          className="settings-input"
+          spellCheck={false}
+          placeholder="Consolas, 'Courier New', monospace"
+          value={editor.fontFamily}
+          onChange={(e) => void updateEditor({ fontFamily: e.target.value })}
         />
       </label>
-      <label className="settings-field settings-check">
-        <span className="settings-check-text">
-          <span className="settings-label">Ctrl + 滚轮缩放</span>
-          <span className="settings-detail">
-            按住 Ctrl（macOS 为 Cmd）滚动鼠标滚轮时调整编辑器字号（8–40）。
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          checked={editor.mouseWheelZoom}
-          onChange={(e) =>
-            void updateEditor({ mouseWheelZoom: e.target.checked })
-          }
-        />
-      </label>
+      <CheckField
+        label="连字"
+        detail="启用字体连字（Fira Code 等字体的 =>、!= 合字）。"
+        checked={editor.fontLigatures}
+        onChange={(fontLigatures) => void updateEditor({ fontLigatures })}
+      />
+
+      <div className="settings-group-title">显示</div>
+      <SelectField
+        label="行号"
+        value={editor.lineNumbers}
+        options={LINE_NUMBERS}
+        onChange={(lineNumbers) => void updateEditor({ lineNumbers })}
+      />
+      <SelectField
+        label="空白字符"
+        value={editor.renderWhitespace}
+        options={RENDER_WHITESPACE}
+        onChange={(renderWhitespace) => void updateEditor({ renderWhitespace })}
+      />
+      <SelectField
+        label="当前行高亮"
+        value={editor.renderLineHighlight}
+        options={RENDER_LINE_HIGHLIGHT}
+        onChange={(renderLineHighlight) =>
+          void updateEditor({ renderLineHighlight })
+        }
+      />
+      <CheckField
+        label="缩进参考线"
+        detail="显示缩进层级的竖线。"
+        checked={editor.guides.indentation}
+        onChange={(indentation) => void updateEditor({ guides: { indentation } })}
+      />
+      <CheckField
+        label="代码折叠"
+        detail="在行号槽显示折叠控件。"
+        checked={editor.folding}
+        onChange={(folding) => void updateEditor({ folding })}
+      />
+      <SelectField
+        label="括号匹配"
+        value={editor.matchBrackets}
+        options={MATCH_BRACKETS}
+        onChange={(matchBrackets) => void updateEditor({ matchBrackets })}
+      />
+      <CheckField
+        label="平滑滚动"
+        detail="滚动时使用动画过渡。"
+        checked={editor.smoothScrolling}
+        onChange={(smoothScrolling) => void updateEditor({ smoothScrolling })}
+      />
+
+      <div className="settings-group-title">光标</div>
+      <SelectField
+        label="光标样式"
+        value={editor.cursorStyle}
+        options={CURSOR_STYLE}
+        onChange={(cursorStyle) => void updateEditor({ cursorStyle })}
+      />
+      <SelectField
+        label="光标闪烁"
+        value={editor.cursorBlinking}
+        options={CURSOR_BLINKING}
+        onChange={(cursorBlinking) => void updateEditor({ cursorBlinking })}
+      />
       <p className="settings-hint">以上修改会立即应用到当前已打开的编辑器。</p>
     </div>
   );

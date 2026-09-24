@@ -25,13 +25,29 @@ import {
 import { useUiStore } from "./uiStore";
 
 const DEFAULT_EDITOR: EditorSettings = {
+  fontFamily: "Consolas, 'Courier New', monospace",
   fontSize: 14,
+  fontLigatures: false,
   tabSize: 2,
   wordWrap: "off",
   minimap: false,
+  lineNumbers: "on",
+  renderWhitespace: "selection",
+  renderLineHighlight: "line",
+  guides: { indentation: true },
+  folding: true,
+  matchBrackets: "near",
+  smoothScrolling: false,
+  cursorStyle: "line",
+  cursorBlinking: "blink",
   mouseWheelZoom: false,
   theme: "vs-dark",
 };
+
+/** Deep-clone the editor config so persisted patches never share `guides`. */
+function cloneEditor(editor: EditorSettings): EditorSettings {
+  return { ...editor, guides: { ...editor.guides } };
+}
 
 const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };
 
@@ -106,7 +122,7 @@ interface ConfigStore {
 /** The defaults as a patch, used to persist partial updates cleanly. */
 const baseConfig = (): UserConfigPatch => ({
   keybindings: { ...DEFAULT_KEYBINDINGS },
-  editor: { ...DEFAULT_EDITOR },
+  editor: cloneEditor(DEFAULT_EDITOR),
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
   lsp: cloneLsp(DEFAULT_LSP),
@@ -116,7 +132,7 @@ const baseConfig = (): UserConfigPatch => ({
 export const useConfigStore = create<ConfigStore>((set, get) => ({
   loaded: false,
   keybindings: { ...DEFAULT_KEYBINDINGS },
-  editor: { ...DEFAULT_EDITOR },
+  editor: cloneEditor(DEFAULT_EDITOR),
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
   lsp: cloneLsp(DEFAULT_LSP),
@@ -132,7 +148,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
       set({
         loaded: true,
         keybindings: { ...DEFAULT_KEYBINDINGS, ...config.keybindings },
-        editor: { ...DEFAULT_EDITOR, ...config.editor },
+        editor: cloneEditor({ ...DEFAULT_EDITOR, ...config.editor }),
         terminal: { ...DEFAULT_TERMINAL, ...config.terminal },
         general: { ...DEFAULT_GENERAL, ...config.general },
         lsp: {
@@ -159,12 +175,12 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
 
   updateEditor: async (patch) => {
-    const editor = { ...get().editor, ...patch };
+    const editor = cloneEditor({ ...get().editor, ...patch });
     set({ editor });
     const state = get();
     const full = baseConfig();
     full.keybindings = { ...state.keybindings };
-    full.editor = { ...editor };
+    full.editor = cloneEditor(editor);
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
@@ -182,7 +198,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const state = get();
     const full = baseConfig();
     full.keybindings = { ...state.keybindings };
-    full.editor = { ...state.editor };
+    full.editor = cloneEditor(state.editor);
     full.terminal = { ...terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
@@ -200,7 +216,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const state = get();
     const full = baseConfig();
     full.keybindings = { ...state.keybindings };
-    full.editor = { ...state.editor };
+    full.editor = cloneEditor(state.editor);
     full.terminal = { ...state.terminal };
     full.general = { ...general };
     full.lsp = cloneLsp(state.lsp);
@@ -221,7 +237,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const state = get();
     const full = baseConfig();
     full.keybindings = { ...state.keybindings };
-    full.editor = { ...state.editor };
+    full.editor = cloneEditor(state.editor);
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
@@ -254,7 +270,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     const state = get();
     const full = baseConfig();
     full.keybindings = { ...keybindings };
-    full.editor = { ...state.editor };
+    full.editor = cloneEditor(state.editor);
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);

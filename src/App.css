@@ -1479,6 +1479,13 @@ body.layout-resizing-horizontal {
   color: var(--vo-color-ffffff);
 }
 
+.settings-group-title {
+  margin: 12px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vo-color-9d9d9d);
+}
+
 .settings-field {
   display: flex;
   align-items: center;

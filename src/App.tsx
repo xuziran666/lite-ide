@@ -36,8 +36,10 @@ function App() {
       if (useConfigStore.getState().general.theme === "system") applyTheme();
     };
     systemDark.addEventListener("change", onChange);
-    const unsubscribe = useConfigStore.subscribe((s) => {
-      if (s.general.theme === useConfigStore.getState().general.theme) applyTheme();
+    // Only a `general.theme` change re-resolves the UI theme: unrelated config
+    // edits (font size, keybindings, shells) must not touch <html data-theme>.
+    const unsubscribe = useConfigStore.subscribe((state, prev) => {
+      if (state.general.theme !== prev.general.theme) applyTheme();
     });
     return () => {
       systemDark.removeEventListener("change", onChange);
