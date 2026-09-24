@@ -40,7 +40,16 @@ function TreeNode({ node, depth, onMenu }: Props) {
       >
         {isDir ? (
           <span className={`tree-chevron${node.expanded ? " open" : ""}`} aria-hidden="true">
-            ▸
+            <svg width="12" height="12" viewBox="0 0 16 16">
+              <path
+                d="M6 4l4 4-4 4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </span>
         ) : (
           <span className="tree-chevron" aria-hidden="true" />

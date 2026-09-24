@@ -152,7 +152,7 @@ body,
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 42px;
+  height: 36px;
   padding: 0 0 0 12px;
   background-color: var(--vo-color-252526);
   border-bottom: 1px solid var(--vo-color-3c3c3c);
@@ -161,10 +161,20 @@ body,
 }
 
 .top-bar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13px;
   font-weight: 600;
   color: var(--vo-color-ffffff);
   white-space: nowrap;
+}
+
+.top-bar-logo {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .top-bar-workspace {
@@ -174,8 +184,6 @@ body,
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--vo-color-9d9d9d);
-  padding-left: 10px;
-  border-left: 1px solid var(--vo-color-3c3c3c);
 }
 
 .top-bar-spacer {
@@ -185,9 +193,8 @@ body,
 /* Task Center trigger occupying the reserved top bar slot. */
 .top-bar-task-center {
   flex: none;
-  width: 96px;
+  width: 60px;
   height: 100%;
-  border-left: 1px solid var(--vo-color-3c3c3c);
 }
 
 .top-bar-task-trigger {
@@ -207,7 +214,7 @@ body,
 .top-bar-task-trigger:hover,
 .top-bar-task-trigger.active {
   color: var(--vo-color-ffffff);
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-3a3d41);
 }
 
 .top-bar-task-dot {
@@ -222,7 +229,7 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
+  width: 36px;
   height: 30px;
   padding: 0;
   background: transparent;
@@ -254,7 +261,7 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 40px;
   height: 100%;
   padding: 0;
   background: transparent;
@@ -282,7 +289,7 @@ body,
 
 .activity-bar {
   flex: none;
-  width: 48px;
+  width: 36px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -407,12 +414,14 @@ body,
 .icon-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   background: transparent;
   border: none;
   border-radius: 3px;
   color: var(--vo-color-9d9d9d);
   cursor: pointer;
-  padding: 2px 5px;
 }
 
 .icon-btn:hover {
@@ -855,7 +864,7 @@ body.layout-resizing-horizontal {
 }
 
 .terminal-reopen-bar:hover {
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-3a3d41);
   color: var(--vo-color-ffffff);
 }
 
@@ -890,7 +899,7 @@ body.layout-resizing-horizontal {
 }
 
 .terminal-toolbar-button:hover {
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-3a3d41);
   color: var(--vo-color-ffffff);
 }
 
@@ -929,7 +938,7 @@ body.layout-resizing-horizontal {
 }
 
 .terminal-tab:hover {
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-2a2d2e);
   color: var(--vo-color-ffffff);
 }
 
@@ -954,7 +963,7 @@ body.layout-resizing-horizontal {
 }
 
 .terminal-tab-add:hover {
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-3a3d41);
   color: var(--vo-color-ffffff);
 }
 
@@ -1010,7 +1019,7 @@ body.layout-resizing-horizontal {
 /* Task Center dropdown */
 .task-center {
   position: fixed;
-  top: 44px;
+  top: 38px;
   right: 8px;
   z-index: 120;
   width: 280px;
@@ -1686,7 +1695,7 @@ body.layout-resizing-horizontal {
 }
 
 .search-toggle:hover {
-  background-color: var(--vo-color-2d2d38);
+  background-color: var(--vo-color-3a3d41);
   color: var(--vo-color-ffffff);
 }
 
@@ -1764,7 +1773,7 @@ body.layout-resizing-horizontal {
 }
 
 .search-match-row:hover {
-  background-color: var(--vo-color-37373d);
+  background-color: var(--vo-color-2a2d2e);
 }
 
 .search-match-loc {
@@ -1827,7 +1836,7 @@ body.layout-resizing-horizontal {
 }
 
 .outline-row:hover {
-  background-color: var(--vo-color-37373d);
+  background-color: var(--vo-color-2a2d2e);
   color: var(--vo-color-ffffff);
 }
 
@@ -1906,7 +1915,7 @@ body.layout-resizing-horizontal {
 }
 
 .quick-open-row:hover {
-  background-color: var(--vo-color-37373d);
+  background-color: var(--vo-color-2a2d2e);
 }
 
 .quick-open-row.active {

@@ -123,6 +123,15 @@ function TopBar({
   return (
     <header className="top-bar" data-tauri-drag-region>
       <span className="top-bar-brand" data-tauri-drag-region>
+        <img
+          className="top-bar-logo"
+          src="/logo.png"
+          alt=""
+          width={16}
+          height={16}
+          draggable={false}
+          data-tauri-drag-region
+        />
         lite-ide
       </span>
       {workspacePath && (

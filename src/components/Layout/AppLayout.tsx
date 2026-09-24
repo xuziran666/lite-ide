@@ -40,11 +40,11 @@ import {
 import { cancelAutoSave } from "../../utils/autoSave";
 
 const MIN_TREE_WIDTH = 180;
-const MAX_TREE_WIDTH = 500;
+const MAX_TREE_WIDTH = 400;
 const MIN_TERMINAL_HEIGHT = 120;
 const MIN_RIGHT_SIDEBAR_WIDTH = 200;
 const MAX_RIGHT_SIDEBAR_WIDTH = 500;
-const DEFAULT_TREE_WIDTH = 240;
+const DEFAULT_TREE_WIDTH = 220;
 const DEFAULT_TERMINAL_HEIGHT = 200;
 const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 
