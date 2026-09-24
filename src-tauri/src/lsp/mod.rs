@@ -10,6 +10,7 @@
 //! - The reader thread never panics on unknown JSON-RPC shapes; unsupported
 //!   server requests are answered `-32601`.
 
+pub mod cpp;
 pub mod rpc;
 pub mod session;
 pub mod transport;

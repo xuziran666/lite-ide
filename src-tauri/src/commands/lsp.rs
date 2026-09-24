@@ -48,7 +48,13 @@ pub async fn lsp_start(
             path.as_deref().map(Path::new),
             &workspace,
         );
-        let command = lsp::resolve_command(&language, command);
+        let mut command = lsp::resolve_command(&language, command);
+        // clangd needs a little toolchain help on Windows (see `lsp::cpp`):
+        // honor `.clangd`, whitelist the PATH compiler for header extraction,
+        // and only fall back to it when the project has no compilation database.
+        if language == "cpp" {
+            command.extend(lsp::cpp::clangd_args(&workspace));
+        }
         let process_id = std::process::id();
 
         let session = LspSession::start(
