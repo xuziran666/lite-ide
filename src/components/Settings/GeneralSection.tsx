@@ -1,5 +1,11 @@
 import { useConfigStore } from "../../stores/configStore";
 
+const THEME_OPTIONS: { value: string; label: string }[] = [
+  { value: "dark", label: "暗色" },
+  { value: "light", label: "亮色" },
+  { value: "system", label: "跟随系统" },
+];
+
 function CheckField({
   label,
   detail,
@@ -45,6 +51,20 @@ function GeneralSection() {
         checked={general.confirmBeforeClose}
         onChange={(value) => void updateGeneral({ confirmBeforeClose: value })}
       />
+      <label className="settings-field settings-row">
+        <span className="settings-label">主题</span>
+        <select
+          className="settings-select"
+          value={general.theme}
+          onChange={(e) => void updateGeneral({ theme: e.target.value })}
+        >
+          {THEME_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

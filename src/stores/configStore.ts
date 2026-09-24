@@ -38,6 +38,7 @@ const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };
 const DEFAULT_GENERAL: GeneralSettings = {
   restoreLastWorkspace: true,
   confirmBeforeClose: true,
+  theme: "dark",
 };
 
 const DEFAULT_FILES: FilesSettings = {

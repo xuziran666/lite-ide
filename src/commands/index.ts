@@ -112,6 +112,7 @@ export interface TerminalSettings {
 export interface GeneralSettings {
   restoreLastWorkspace: boolean;
   confirmBeforeClose: boolean;
+  theme: string;
 }
 
 /**

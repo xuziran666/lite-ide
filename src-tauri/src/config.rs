@@ -125,6 +125,8 @@ pub struct GeneralConfigFile {
     pub restore_last_workspace: Option<bool>,
     #[serde(default)]
     pub confirm_before_close: Option<bool>,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 /// The resolved config sent to the frontend: defaults merged with `user.json`
@@ -222,6 +224,7 @@ impl Default for TerminalSettings {
 pub struct GeneralSettings {
     pub restore_last_workspace: bool,
     pub confirm_before_close: bool,
+    pub theme: String,
 }
 
 impl Default for GeneralSettings {
@@ -229,6 +232,7 @@ impl Default for GeneralSettings {
         Self {
             restore_last_workspace: true,
             confirm_before_close: true,
+            theme: "dark".to_string(),
         }
     }
 }
@@ -359,6 +363,16 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
     let g = &mut file.general;
     g.restore_last_workspace = Some(g.restore_last_workspace.unwrap_or(true));
     g.confirm_before_close = Some(g.confirm_before_close.unwrap_or(true));
+    let ui_theme = g
+        .theme
+        .as_deref()
+        .unwrap_or("dark")
+        .trim()
+        .to_ascii_lowercase();
+    g.theme = Some(match ui_theme.as_str() {
+        "light" | "dark" | "system" => ui_theme,
+        _ => "dark".to_string(),
+    });
 
     let lsp = resolve_lsp(&file.lsp);
     file.lsp = LspConfigFile {
@@ -409,6 +423,7 @@ fn parse_user_config(text: &str) -> UserConfig {
                         .restore_last_workspace
                         .unwrap_or(true),
                     confirm_before_close: file.general.confirm_before_close.unwrap_or(true),
+                    theme: file.general.theme.unwrap_or_else(|| "dark".to_string()),
                 },
                 lsp,
                 files: FilesSettings {
@@ -577,6 +592,18 @@ mod tests {
         assert_eq!(cfg.terminal.default_shell, "cmd.exe");
         assert!(!cfg.general.restore_last_workspace);
         assert!(!cfg.general.confirm_before_close);
+        assert_eq!(cfg.general.theme, "light");
+    }
+
+    #[test]
+    fn general_theme_is_whitelisted() {
+        let cfg = parse_user_config(
+            r#"{"general":{"theme":"system"},"editor":{"theme":"bogus"}}"#,
+        );
+        assert_eq!(cfg.general.theme, "system");
+        assert_eq!(cfg.editor.theme, "vs-dark");
+        let cfg = parse_user_config(r#"{"general":{"theme":"bogus"}}"#);
+        assert_eq!(cfg.general.theme, "dark");
     }
 
     #[test]
