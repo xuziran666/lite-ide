@@ -1,6 +1,6 @@
 # lite-ide 架构说明
 
-> 版本 0.1.0 · 代码基线 `main@df57238`
+> 版本 0.1.0 · 代码基线 `main@aa44218`
 
 ## 1. 技术栈与版本
 
@@ -29,6 +29,7 @@ lite-ide/
 │   │   ├── Terminal/           Terminal（xterm 多标签实例、工具栏、任务终端）
 │   │   ├── Tasks/              TaskCenter（任务中心下拉）
 │   │   ├── Search/             QuickOpen（覆盖式）、GlobalSearch（右侧栏）
+│   │   ├── References/         ReferencesPanel（查找引用结果）
 │   │   ├── Outline/            OutlinePanel（documentSymbol）
 │   │   ├── Problems/           ProblemsPanel（Monaco markers 聚合）
 │   │   ├── Settings/           SettingsView + General / Editor / Terminal / Tasks / Keyboard 五分区
@@ -37,7 +38,8 @@ lite-ide/
 │   ├── editor/                 monacoSetup（worker 环境 + 关闭被 LSP 取代的 TS/JS worker 能力）、
 │   │                           modelStore（模型生命周期）、cppOutline（C/C++ Outline 回退扫描器）
 │   ├── lsp/                    protocol（wire 类型与转换）、languages（语言描述表）、
-│   │                           client（通用 LSP 客户端：session/事件/provider/定义跳转）
+│   │                           client（通用 LSP 客户端：session/事件/provider/定义跳转/引用/重命名/签名/代码操作/格式化）、
+│   │                           workspaceEdit（WorkspaceEdit 解析与安全应用）
 │   ├── stores/                 workspaceStore、fileTreeStore、editorStore、configStore、
 │   │                           terminalStore、taskStore、searchStore、uiStore
 │   ├── types/                  index.ts（DirEntry/TreeNode/Tab/CursorInfo）、monaco-internals.d.ts
@@ -142,7 +144,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | `fileTreeStore` | 树的加载与刷新（`loadRoot`/`toggleDir`/`loadChildren`/`refreshPath`/`revealPath`）、CRUD 包装、`selectedPath`、`version` 竞态令牌 |
 | `editorStore` | 打开标签、`activePath`、脏状态、`save`，关闭流程、外部变更、光标信息、`openGlobalFile`（外部标签打开 `tasks.json`）、`openExternalFile`（只读外部文件，见 §7） |
 | `configStore` | 用户配置加载/热更新、`settingsOpen`、键位录制落盘（`saveKeybinding` 冲突检测）、shell 列表、`lsp` 配置（`cloneLsp` 深拷贝回写） |
-| `searchStore` | Quick Open 文件索引与开关、右侧栏开关与当前标签（search/outline/problems） |
+| `searchStore` | Quick Open 文件索引与开关、右侧栏开关与当前标签（search/references/outline/problems）、查找引用结果（`references`/`referencesSymbol`/`referencesLoading`） |
 | `terminalStore` | 终端记录（id/name/exited/kind）、多标签 create/close/select、退出标记 |
 | `taskStore` | 任务列表、任务中心开关、任务终端 id、运行状态、`runTask`（变量解析→排队→任务终端执行） |
 | `uiStore` | 全局 Toast 提示 |
@@ -219,6 +221,17 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 - **数据库优先**：clangd 原生在源文件父目录与 `build/` 搜索 `compile_commands.json`；存在时以其编译命令为准（不追加任何覆盖参数），并移除本工具生成的受管 `.clangd`。
 - **无数据库回退**：从 `PATH` 查找 `g++`（其次 `gcc`；Windows 为 `g++.exe`/`gcc.exe`），生成受管 `.clangd`（首行标记 `# Managed by lite-ide`，`CompileFlags.Compiler: <绝对路径（正斜杠）>`），启动参数追加 `--enable-config`（启用 `.clangd`）与 `--query-driver=<该路径>`（允许 clangd 调用它提取 libstdc++ 系统头文件）。
 - 安全：项目自带 `.clangd`（文件或旧版目录）**绝不覆盖**；检测到数据库立即删除受管文件；无编译器可回退时清理残留。不硬编码任何 MinGW/MSVC/STL 路径。
+
+### 10.4 语言能力扩展（Phase 12）
+
+- **能力门控**：`lsp_start` 现在把服务器 `initialize` 结果里的 `capabilities` 一并返回；`client.ts` 用 `serverCapabilities: Map<语言, object>` 保存，`serverSupports()` 在请求前判断（未知=尝试一次，失败静默）。Rust 后端 `LspSession` 保存 capabilities 并暴露 getter（`session.rs`）。
+- **新增 Provider（仍注册一次、按 model 语言分发）**：`registerReferenceProvider`、`registerRenameProvider`、`registerSignatureHelpProvider`、`registerDocumentFormattingEditProvider`、`registerDocumentRangeFormattingEditProvider`、`registerCodeActionProvider`。
+  - 重命名用 Monaco 内建输入框驱动：`resolveRenameLocation` → `textDocument/prepareRename`，`provideRenameEdits` → `textDocument/rename` → `buildMonacoWorkspaceEdit`（会先打开目标文件，资源 URI 取真实 model 的 `uri`）。
+  - 代码操作：把 `context.markers` 转为 LSP `Diagnostic` 传入；返回项统一封装成 Monaco 命令 `liteide.applyCodeAction`，执行时 `applyWorkspaceEdit` / `workspace/executeCommand`（`registerCommand` 注册一次）。
+  - 格式化 options 取 `configStore.editor.tabSize`，`insertSpaces` 缺省 true。
+- **WorkspaceEdit（`lsp/workspaceEdit.ts`）**：解析 `changes` 与 `documentChanges`（`TextDocumentEdit`），资源操作直接拒绝；工作区外目标拒绝并 toast；通过 `useEditorStore.openFile` 打开目标（保留本地未保存内容）后用 `model.pushEditOperations` 应用以保留撤销栈；写入前校验工作区未切换。
+- **快捷键**：`F2`/`Shift+F12`/`Ctrl+.`/`Shift+Alt+F` 加入 `keybindings`（后端 `config.rs` 默认下发、前端 `config/keybindings.ts`），在 `AppLayout` 的**捕获阶段**监听（编辑器聚焦时），避免被 Monaco 内建同名按键吞掉；Rename/QuickFix/Format 复用 Monaco 内建 action。
+- **引用 UI**：`findReferencesAtCursor` 请求 `textDocument/references` 后写入 `searchStore`，`ReferencesPanel` 在右侧栏「引用」标签分组展示。
 
 ## 11. 目录过滤三套规则（实现）
 

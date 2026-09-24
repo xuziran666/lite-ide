@@ -1,6 +1,6 @@
 # lite-ide 功能汇总
 
-> 版本 0.1.0 · 代码基线 `main@df57238` · 最后更新 2026-09
+> 版本 0.1.0 · 代码基线 `main@aa44218` · 最后更新 2026-09
 
 基于 Tauri v2 的轻量级跨平台代码编辑器，核心为**文件树**、**代码编辑器（Monaco）**、**内置终端（xterm.js + portable-pty）**、**任务/设置系统**，以及**项目导航**与**内置 LSP 客户端**。
 
@@ -27,7 +27,7 @@
 | 任务 | 全局 tasks.json、任务中心、变量展开与 Windows 路径归一化、专用任务终端 | ✅ |
 | 设置 | 通用/编辑器/终端/任务/键盘快捷键 5 分区，user.json 读写（含 lsp 配置） | ✅ |
 | 项目导航 | Quick Open（Ctrl+P）、全局搜索（Ctrl+Shift+F）、右侧栏（搜索/大纲/问题） | ✅ |
-| 语言服务 | 内置 LSP 客户端：Rust（rust-analyzer）、C/C++（clangd）、TS/JS（typescript-language-server）：诊断/补全/悬停/定义/大纲、Ctrl+左键跳转 | ✅ |
+| 语言服务 | 内置 LSP 客户端：Rust（rust-analyzer）、C/C++（clangd）、TS/JS（typescript-language-server）：诊断/补全/悬停/定义/大纲/引用/重命名/签名帮助/代码操作/格式化、Ctrl+左键跳转 | ✅ |
 | 布局 | 三栏拖拽 + 右侧栏、文件树/终端折叠、底部状态栏、设置页覆盖中心区 | ✅ |
 | 窗口 | 最小尺寸、标题跟随工作区、关窗未保存保护（可配置） | ✅ |
 | 命令面板 / Git / 调试 / 主题切换 | — | ❌ 未实现 |
@@ -115,11 +115,12 @@
 - 选项：区分大小写（`Aa`）、正则（`.*`）；结果按文件分组、显示 `行:列` 与整行文本，点击经 `openAndReveal` 跳转。
 - 后端 `search_workspace`：递归遍历（跳过隐藏目录、包含 `node_modules`、不跟随 symlink 目录），逐行匹配；**上限**：总匹配 2000、单文件 200、单文件扫描 4MB、非 UTF-8 跳过。正则非法时返回可读错误。
 
-### 8.3 右侧栏（大纲 / 问题）
+### 8.3 右侧栏（搜索 / 引用 / 大纲 / 问题）
 
-- 顶部栏右侧按钮切换右侧栏；面板为 **搜索 / 大纲 / 问题** 三标签，宽度可拖拽。
+- 顶部栏右侧按钮切换右侧栏；面板为 **搜索 / 引用 / 大纲 / 问题** 四标签，宽度可拖拽。
 - **大纲（Outline）**：调用 Monaco 的 `documentSymbol` 提供者（即语言服务）构建符号树，层级缩进、点击跳转到符号起始位置；无语言服务时 C/C++ 使用正则扫描回退（函数/类/结构体/枚举/命名空间/typedef/using 别名，基于花括号深度的**行扫描，非 AST**）。
 - **问题（Problems）**：聚合当前所有 Monaco markers（按文件分组，显示严重级别 E/W/I/H、行:列、消息），点击跳转。
+- **引用（References）**：`Shift+F12` 查找当前符号的引用（`textDocument/references`，`includeDeclaration: true`），按文件分组显示 `行:列` 与（文件已打开时的）整行预览，点击经 `openAndReveal` 跳转；无结果或语言不支持时显示 `No references available`。
 
 ## 9. 语言服务（内置 LSP 客户端）
 
@@ -179,6 +180,23 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 
 当前**未提供 Settings UI**，默认值 + PATH 生效；保存其它设置时会原样保留 `lsp` 节，不会被清空。
 
+### 9.8 语言能力增强（Phase 12）
+
+在既有诊断/补全/悬停/定义/大纲之上，新增以下能力，全部通过对应 LSP server 完成，不自建语言分析：
+
+- **查找引用（`Shift+F12`）**：`textDocument/references`（`includeDeclaration: true`），结果按文件分组显示在右侧栏「引用」标签，点击跳转。（同时注册了 Monaco 的 `ReferenceProvider`。）
+- **重命名（`F2`）**：Monaco 内建重命名输入框驱动 `RenameProvider` —— `textDocument/prepareRename` 校验（不可重命名时给出原因），`textDocument/rename` 返回的 **WorkspaceEdit 支持跨文件**；目标文件若未打开会先作为标签打开再应用编辑，因此多文件重命名、撤销、脏状态、保存均正常。工作区外的目标会被拒绝并提示；资源操作（create/rename/delete）暂不支持并明确提示。
+- **签名帮助**：`textDocument/signatureHelp`，在 `(` / `,` 自动触发（`, ` 作为重触发字符）；映射 `signatures` / `activeSignature` / `activeParameter`，无结果返回 null。
+- **代码操作 / 快速修复（`Ctrl+.`）**：`textDocument/codeAction`，把当前 Monaco markers 转换为 LSP `Diagnostic` 传入 `context.diagnostics`；返回的 `CodeAction`/`Command` 统一封装为 Monaco 命令 —— 含 `edit` 的经 `applyWorkspaceEdit` 应用，含 `command` 的经 `workspace/executeCommand` 执行（返回 WorkspaceEdit 也会应用）。编辑器右键菜单中的 Quick Fix 同样可用。
+- **格式化（`Shift+Alt+F`）**：`textDocument/formatting`（`options.tabSize` 取编辑器设置，`insertSpaces` 缺省 true）与 `textDocument/rangeFormatting`（选区）。服务器不支持时提示 `Formatting is not supported by the language server`，不伪造结果。
+
+通用规则：
+
+- **能力门控**：启动时把服务器 `initialize` 返回的 capabilities 存下，请求前据此判断；不支持的能力直接返回空/null（未知时尝试一次，失败则静默）。
+- **WorkspaceEdit**：`applyWorkspaceEdit()` 支持 `changes` 与 `documentChanges`（`TextDocumentEdit`）；受工作区边界约束，工作区外文件一律拒绝并提示；通过 `model.pushEditOperations` 应用以保留撤销栈。
+- **竞态保护**：references / rename / code action 的异步结果在写入前校验工作区未切换，避免旧工作区的编辑落到新工作区。
+- **快捷键**：`F2` / `Shift+F12` / `Ctrl+.` / `Shift+Alt+F` 均进入 `user.json` 的 `keybindings` 体系（可在设置中查看/重绑），在编辑器获得焦点时于捕获阶段拦截，避免与 Monaco 内建按键冲突。
+
 ## 10. 设置系统
 
 - **入口与布局**：活动栏底部 ⚙ 打开设置页，覆盖编辑器中心区域（`.workbench` 隐藏但保持挂载，Monaco 模型/标签/终端 PTY 不销毁）；「◀ 返回编辑器」关闭；活动栏文件树/任务按钮会先关闭设置。
@@ -192,7 +210,7 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | 任务 | 打开 tasks.json 编辑全局任务 | 保存后重启应用 |
 | 键盘快捷键 | 见下 | 立即生效 |
 
-- **键盘快捷键**：10 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。
+- **键盘快捷键**：14 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`、`renameSymbol`、`findReferences`、`codeActions`、`formatDocument`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。（`F2`/`Shift+F12`/`Shift+Alt+F` 等默认值由后端下发，绕过“须含 Ctrl”的录制校验。）
 - **持久化**：所有设置在改动时即时写回 `user.json`（后端做边界钳制/空值回退/非法 `wordWrap` 归 off）；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
 - **user.json 结构**（camelCase）：
 
@@ -241,7 +259,12 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | `Ctrl/Cmd + W` | 关闭当前标签（脏文件走保存确认） |
 | `Ctrl/Cmd + Shift + T` | 恢复关闭的标签 |
 | `Ctrl + Tab` / `Ctrl + Shift + Tab` | 下一个／上一个标签 |
-| `Ctrl + Ctrl`（快速按两次 Ctrl） | 打开任务中心 |
+| `Ctrl/Cmd + Ctrl`（快速按两次 Ctrl） | 打开任务中心 |
+| `F2` | 重命名符号（编辑器内） |
+| `Shift + F12` | 查找引用（编辑器内，结果入右侧栏） |
+| `Ctrl/Cmd + .` | 代码操作 / 快速修复（编辑器内） |
+| `Shift + Alt + F` | 格式化文档（编辑器内） |
+| 编辑器内 `(` / `,` | 自动触发签名帮助 |
 | `Ctrl/Cmd + 左键` | 跳转到定义（编辑器内） |
 | 鼠标中键点击标签 | 关闭该标签 |
 | 终端内 `Ctrl+C` | 有选区复制 / 无选区中断 |
@@ -262,7 +285,9 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 
 ## 14. 已知限制与未实现
 
-- 无命令面板（`Ctrl+Shift+P` 命令执行）；无 Git 集成；无格式化/重命名（来自语言服务器的重命名等未接入）；无调试；无主题切换（固定 `vs-dark`）。
+- 无命令面板（`Ctrl+Shift+P` 命令执行）；无 Git 集成；无调试；无主题切换（固定 `vs-dark`）。
+- 语言能力**取决于所配置的语言服务器**：并非所有服务器都支持全部能力（例如 rust-analyzer 不提供 `documentRangeFormattingProvider`，即不支持选区格式化），此时对应请求返回空、不伪造结果（代码操作里 `codeAction/resolve` 延迟解析也暂未实现）。
+- 重命名/代码操作的 WorkspaceEdit 不支持资源操作（创建/重命名/删除文件），会给出明确提示；跨文件编辑会先把目标文件作为标签打开（不自动保存，交由用户保存）。
 - 语言服务依赖 PATH 中的外部服务器：`rust-analyzer` / `clangd` / `typescript-language-server` 需自行安装；未安装时对应语言无诊断/补全/跳转（TS/JS 内置 worker 的相关能力已被关闭以让位于语言服务）。
 - C/C++ 无 `compile_commands.json` 时用 PATH 的 `g++`/`gcc` 回退；若项目实际使用 MSVC 却既无数据库也无 `.clangd`，回退可能与预期不符（提供数据库或项目自带 `.clangd` 即可覆盖）。
 - 任务为**全局**（非按工作区），且 `tasks.json` 修改保存后需重启应用生效；无按任务的输出解析/错误匹配。
@@ -301,4 +326,6 @@ pnpm tauri dev
 17. **C/C++ LSP**：打开含 `#include <vector>` 的 MinGW 项目（无 `compile_commands.json`）→ `Ctrl/Cmd+左键` `std::vector` 跳转到 **MinGW libstdc++** 的 `bits/stl_vector.h`（而非 MSVC）；项目放入 `compile_commands.json`（根或 `build/`）后重启语言服务 → 以数据库的编译器为准；
 18. **TypeScript LSP**：打开 `.ts` → 补全/悬停/诊断/大纲正常，`Ctrl/Cmd+左键` 跳转到定义；
 19. 设置关闭「恢复上次打开的文件夹」→ 重启回欢迎页；开启 → 自动回到上次工作区；把该目录改名后启动 → 静默回到欢迎页；
-20. 修改文件但不保存 → 关闭应用 → 出现「保存并退出 / 不保存 / 取消」；勾选设置关闭该确认后 → 直接退出。
+20. 修改文件但不保存 → 关闭应用 → 出现「保存并退出 / 不保存 / 取消」；勾选设置关闭该确认后 → 直接退出；
+21. **引用 / 重命名（Rust 跨文件）**：打开含 `lib.rs`（`pub fn greet`）与 `main.rs`（调用 `greet`）的项目 → 光标置于 `greet` 上按 `Shift+F12` → 右侧栏「引用」列出两处并按文件分组、点击跳转；按 `F2` 重命名为 `hello_greet` → `lib.rs` 与 `main.rs` 同时被修改且标签变脏（可撤销/保存）；
+22. **签名帮助 / 代码操作 / 格式化**：在 C++/TS 中输入 `foo(`、`foo(a,` 出现参数签名；制造一个错误（如 C++ 缺 `#include <vector>`）后按 `Ctrl+.` 出现快速修复（clangd 的 include fix）并可应用；按 `Shift+Alt+F` 格式化（缺省 tab 大小取自编辑器设置）；rust-analyzer 选区格式化会因服务器不支持而无效果（属正常）。

@@ -48,5 +48,6 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 阶段 11：内置 LSP 客户端（Rust） —— 自建 stdio / JSON-RPC 传输（Content-Length 帧、请求-响应关联、未知消息不崩溃）、rust-analyzer 懒启动（首个 `.rs` 打开时）、诊断 / 补全 / 悬停 / 定义 / `documentSymbol`、Ctrl/Cmd+左键定义跳转（Ctrl+hover 仅显示可点击态不跳转）、workspace 外文件以只读单文件标签打开、按工作区/退出/最后文件关闭的生命周期与崩溃后不自动重启。
 - 阶段 11.2：多语言 LSP —— 同一通用客户端支持 clangd（C/C++）与 `typescript-language-server --stdio`（TS/JS）；单套 Monaco provider 按 model 语言分发，语言层仅描述 id / Monaco 语言 / 扩展名 / 命令 / 参数；`lsp` 用户配置节；关闭 Monaco TS/JS worker 中被 LSP 取代的重复能力。
 - 阶段 11.3：C/C++ 工具链发现 —— `compile_commands.json` 优先（clangd 原生发现 workspace 根与 `build/`，不覆盖其中的编译器/头文件/参数）；无数据库时用 PATH 中的 `g++`/`gcc` 作为 fallback（生成受管 `.clangd` + `--enable-config --query-driver`），不硬编码工具链/STL 路径，出现数据库时自动移除回退。
+- 阶段 12：LSP 增强 —— 查找引用（`Shift+F12`，结果入右侧栏「引用」）、重命名（`F2`，支持跨文件 WorkspaceEdit，工作区外拒绝）、签名帮助（`(`/`,` 自动触发）、代码操作/快速修复（`Ctrl+.`，含右键菜单，`workspace/executeCommand`）、格式化（`Shift+Alt+F`，文档与选区）；新增能力全部按服务器 `initialize` capabilities 门控，四组快捷键进入 `user.json` 键位体系。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
