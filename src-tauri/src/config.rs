@@ -592,7 +592,7 @@ mod tests {
         assert_eq!(cfg.terminal.default_shell, "cmd.exe");
         assert!(!cfg.general.restore_last_workspace);
         assert!(!cfg.general.confirm_before_close);
-        assert_eq!(cfg.general.theme, "light");
+        assert_eq!(cfg.general.theme, "dark");
     }
 
     #[test]
@@ -767,6 +767,7 @@ mod tests {
             general: GeneralSettings {
                 restore_last_workspace: false,
                 confirm_before_close: false,
+                theme: "dark".to_string(),
             },
             lsp: LspSettings::default(),
             files: FilesSettings {
