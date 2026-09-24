@@ -29,24 +29,25 @@ interface MonacoEnv {
 };
 
 // The built-in LSP client (rust-analyzer / clangd / typescript-language-server)
-// is the source of truth for completion, hover, definition, symbols and
-// diagnostics. Disable the Monaco TypeScript/JavaScript worker's copy of those
-// features so an installed server does not produce duplicate suggestions,
-// outline entries or problems. The worker keeps the features the client does
-// not replace (formatting, rename, references, code actions).
+// is the source of truth for completion, hover, definition, symbols,
+// diagnostics, references, rename, signature help, code actions and formatting.
+// Disable the Monaco TypeScript/JavaScript worker's copy of those features so an
+// installed server does not produce duplicate results. The worker keeps the
+// features the client does not replace (document highlights, format-on-type,
+// inlay hints).
 const TS_JS_MODE_CONFIGURATION = {
   completionItems: false,
   hovers: false,
   documentSymbols: false,
   definitions: false,
   diagnostics: false,
-  references: true,
+  references: false,
   documentHighlights: true,
-  rename: true,
-  documentRangeFormattingEdits: true,
-  signatureHelp: true,
+  rename: false,
+  documentRangeFormattingEdits: false,
+  signatureHelp: false,
   onTypeFormattingEdits: true,
-  codeActions: true,
+  codeActions: false,
   inlayHints: true,
 };
 monaco.typescript.typescriptDefaults.setModeConfiguration(

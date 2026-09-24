@@ -10,6 +10,10 @@ export const KEYBINDING_ACTIONS = [
   "openTaskCenter",
   "quickOpen",
   "globalSearch",
+  "renameSymbol",
+  "findReferences",
+  "codeActions",
+  "formatDocument",
 ] as const;
 
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
@@ -28,6 +32,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   openTaskCenter: "Ctrl+Ctrl",
   quickOpen: "Ctrl+P",
   globalSearch: "Ctrl+Shift+F",
+  renameSymbol: "F2",
+  findReferences: "Shift+F12",
+  codeActions: "Ctrl+.",
+  formatDocument: "Shift+Alt+F",
 };
 
 /**
@@ -112,6 +120,10 @@ export const KEYBINDING_LABELS: Record<KeybindingAction, string> = {
   openTaskCenter: "Open Task Center",
   quickOpen: "Quick Open",
   globalSearch: "Global Search",
+  renameSymbol: "Rename Symbol",
+  findReferences: "Find References",
+  codeActions: "Code Actions",
+  formatDocument: "Format Document",
 };
 
 /**

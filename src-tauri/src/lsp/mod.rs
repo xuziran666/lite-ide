@@ -43,6 +43,8 @@ pub struct LspStartResult {
     pub already_running: bool,
     /// The root folder the session was configured with.
     pub root_uri: Option<String>,
+    /// The server's `initialize` capabilities (empty before the handshake).
+    pub capabilities: Value,
 }
 
 

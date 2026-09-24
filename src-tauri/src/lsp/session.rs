@@ -106,6 +106,9 @@ pub struct LspSession {
     pub label: String,
     /// Root folder sent to the server at initialize time.
     pub root_uri: String,
+    /// The `capabilities` object from the server's `initialize` result, kept so
+    /// the frontend can gate providers on what the server actually supports.
+    capabilities: Mutex<Value>,
     child: Mutex<Option<Child>>,
     stdin: Mutex<ChildStdin>,
     next_id: RequestIds,
@@ -167,6 +170,7 @@ impl LspSession {
             language: language.to_string(),
             label,
             root_uri,
+            capabilities: Mutex::new(Value::Null),
             child: Mutex::new(Some(child)),
             stdin: Mutex::new(stdin),
             next_id: RequestIds::new(),
@@ -179,12 +183,17 @@ impl LspSession {
             move || reader_loop(session, stdout)
         });
 
-        session
+        let initialize_result = session
             .request(
                 "initialize",
                 crate::lsp::initialize_params(&session.root_uri, process_id),
             )
             .map_err(|err| format!("LSP initialize 失败: {err}"))?;
+        if let Some(capabilities) = initialize_result.get("capabilities") {
+            if let Ok(mut guard) = session.capabilities.lock() {
+                *guard = capabilities.clone();
+            }
+        }
         session.notify("initialized", Value::Null)?;
 
         Ok(session)
@@ -198,6 +207,15 @@ impl LspSession {
     /// The root URI configured at initialize time.
     pub fn root_uri(&self) -> &str {
         &self.root_uri
+    }
+
+    /// The server capabilities from the `initialize` result (or `null` before
+    /// the handshake completed).
+    pub fn capabilities(&self) -> Value {
+        self.capabilities
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or(Value::Null)
     }
 
     /// Fire a request and wait for its reply (10s timeout). Safe to call

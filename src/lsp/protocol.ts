@@ -51,6 +51,29 @@ export interface LspSymbol {
   children?: LspSymbol[];
 }
 
+export interface LspTextEdit {
+  range: LspRange;
+  newText: string;
+}
+
+/** A location returned by `textDocument/references` / `definition`. */
+export interface LspLocationLike {
+  uri?: string;
+  targetUri?: string;
+  range?: LspRange;
+  targetSelectionRange?: LspRange;
+  targetRange?: LspRange;
+}
+
+/** LSP `Diagnostic` as sent back in a `codeAction` request. */
+export interface LspOutgoingDiagnostic {
+  range: LspRange;
+  severity?: number;
+  code?: string | number;
+  source?: string;
+  message: string;
+}
+
 /** URI‑safe helpers. Keep `/` and `:` verbatim like the Rust `uri.rs`. */
 const ALLOWED =
   /[A-Za-z0-9\-._~/:]/;
@@ -163,6 +186,50 @@ export function lspRangeToMonaco(range: LspRange): monaco.IRange {
     endLineNumber: range.end.line + 1,
     endColumn: range.end.character + 1,
   };
+}
+
+/** An LSP text edit as a Monaco text edit (used by formatting and rename). */
+export function lspTextEditToMonaco(edit: LspTextEdit): monaco.languages.TextEdit {
+  return { range: lspRangeToMonaco(edit.range), text: edit.newText };
+}
+
+/** Monaco marker severity -> LSP DiagnosticSeverity (Error=1..Hint=4). */
+export function monacoSeverityToLsp(severity: monaco.MarkerSeverity): number {
+  switch (severity) {
+    case monaco.MarkerSeverity.Error:
+      return 1;
+    case monaco.MarkerSeverity.Warning:
+      return 2;
+    case monaco.MarkerSeverity.Info:
+      return 3;
+    case monaco.MarkerSeverity.Hint:
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Turn a Monaco marker (as handed to a code-action provider in
+ * `context.markers`) back into the LSP `Diagnostic` shape a server expects.
+ */
+export function monacoMarkerToLspDiagnostic(
+  marker: monaco.editor.IMarkerData,
+): LspOutgoingDiagnostic {
+  const diagnostic: LspOutgoingDiagnostic = {
+    range: {
+      start: { line: marker.startLineNumber - 1, character: marker.startColumn - 1 },
+      end: { line: marker.endLineNumber - 1, character: marker.endColumn - 1 },
+    },
+    severity: monacoSeverityToLsp(marker.severity),
+    message: marker.message,
+  };
+  if (marker.source) diagnostic.source = marker.source;
+  if (marker.code != null) {
+    const code = (marker.code as { value?: string | number }).value ?? marker.code;
+    if (typeof code === "string" || typeof code === "number") diagnostic.code = code;
+  }
+  return diagnostic;
 }
 
 /**

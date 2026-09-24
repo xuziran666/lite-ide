@@ -23,6 +23,13 @@ import { useTaskStore } from "../../stores/taskStore";
 import { useSearchStore } from "../../stores/searchStore";
 import { useConfigStore } from "../../stores/configStore";
 import {
+  editorHasTextFocus,
+  findReferencesAtCursor,
+  runCodeActionAction,
+  runFormatDocumentAction,
+  runRenameAction,
+} from "../../lsp/client";
+import {
   isDoubleCtrlChord,
   parseChord,
   chordMatches,
@@ -315,6 +322,50 @@ function AppLayout() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Editor-scoped LSP shortcuts (Rename / Find References / Code Actions /
+  // Format). Monaco already binds some of these keys itself, so intercept them
+  // in the capture phase *before* Monaco sees them and route through the user's
+  // configured chord (see config/keybindings.ts), only while the editor is
+  // focused.
+  useEffect(() => {
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      if (useConfigStore.getState().settingsOpen) return;
+      if (useTaskStore.getState().taskCenterOpen) return;
+      if (!editorHasTextFocus()) return;
+
+      const keybindings = useConfigStore.getState().keybindings;
+      const match = (action: KeybindingAction) =>
+        chordMatches(parseChord(keybindings[action]), e);
+
+      if (match("renameSymbol")) {
+        e.preventDefault();
+        e.stopPropagation();
+        runRenameAction();
+        return;
+      }
+      if (match("findReferences")) {
+        e.preventDefault();
+        e.stopPropagation();
+        void findReferencesAtCursor();
+        return;
+      }
+      if (match("codeActions")) {
+        e.preventDefault();
+        e.stopPropagation();
+        runCodeActionAction();
+        return;
+      }
+      if (match("formatDocument")) {
+        e.preventDefault();
+        e.stopPropagation();
+        runFormatDocumentAction();
+      }
+    };
+    window.addEventListener("keydown", onKeyDownCapture, true);
+    return () =>
+      window.removeEventListener("keydown", onKeyDownCapture, true);
   }, []);
 
   const handleFileTreeDrag = useCallback((delta: number) => {

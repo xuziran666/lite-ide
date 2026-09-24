@@ -212,6 +212,8 @@ export function searchWorkspace(
 export interface LspStartResult {
   alreadyRunning: boolean;
   rootUri: string | null;
+  /** The server's `initialize` capabilities (feature keys like `renameProvider`). */
+  capabilities: Record<string, unknown> | null;
 }
 
 /**

@@ -37,6 +37,7 @@ pub async fn lsp_start(
                 return Ok(LspStartResult {
                     already_running: true,
                     root_uri: Some(session.root_uri().to_string()),
+                    capabilities: session.capabilities(),
                 });
             }
             // A dead session is dropped and replaced below.
@@ -64,10 +65,12 @@ pub async fn lsp_start(
             root_uri.clone(),
             process_id,
         )?;
+        let capabilities = session.capabilities();
         state.set_lsp(&language, Some(session));
         Ok(LspStartResult {
             already_running: false,
             root_uri: Some(root_uri),
+            capabilities,
         })
     })
     .await

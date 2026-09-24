@@ -1,10 +1,12 @@
 import { useSearchStore } from "../../stores/searchStore";
 import GlobalSearch from "../Search/GlobalSearch";
+import ReferencesPanel from "../References/ReferencesPanel";
 import OutlinePanel from "../Outline/OutlinePanel";
 import ProblemsPanel from "../Problems/ProblemsPanel";
 
 const TABS = [
   { key: "search", label: "搜索" },
+  { key: "references", label: "引用" },
   { key: "outline", label: "大纲" },
   { key: "problems", label: "问题" },
 ] as const;
@@ -32,6 +34,7 @@ function RightSidebar() {
       </div>
       <div className="right-sidebar-panels">
         {tab === "search" && <GlobalSearch />}
+        {tab === "references" && <ReferencesPanel />}
         {tab === "outline" && <OutlinePanel />}
         {tab === "problems" && <ProblemsPanel />}
       </div>

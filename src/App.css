@@ -1796,3 +1796,23 @@ body.layout-resizing-horizontal {
 .quick-open-error {
   color: #f14c4c;
 }
+
+/* ---- Find References ---- */
+
+.references-symbol {
+  flex: none;
+  padding: 6px 8px;
+  border-bottom: 1px solid #3c3c3c;
+  font-size: 12px;
+  color: #cccccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.references-panel .search-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+

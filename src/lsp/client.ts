@@ -13,18 +13,25 @@ import {
   pathToFileUri,
   fileUriToPath,
   monacoPositionToLsp,
+  monacoRangeToLsp,
   lspRangeToMonaco,
   lspDiagnosticsToMonacoMarkers,
   lspSymbolKindToMonaco,
   lspCompletionKindToMonaco,
+  lspTextEditToMonaco,
+  monacoMarkerToLspDiagnostic,
   type LspDiagnostic,
   type LspCompletionItem,
   type LspSymbol,
   type LspRange,
+  type LspTextEdit,
 } from "./protocol";
+import { applyWorkspaceEdit, buildMonacoWorkspaceEdit, type LspWorkspaceEdit } from "./workspaceEdit";
 import { openAndReveal } from "../utils/reveal";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useUiStore } from "../stores/uiStore";
+import { useConfigStore } from "../stores/configStore";
+import { useSearchStore, type ReferenceItem } from "../stores/searchStore";
 import {
   LSP_LANGUAGES,
   LSP_MONACO_SELECTOR,
@@ -75,6 +82,20 @@ const startGates = new Map<string, Promise<boolean>>();
  */
 const previewModels = new Set<monaco.editor.ITextModel>();
 
+/**
+ * The `initialize` capabilities reported by each running server, keyed by
+ * language id. Used to skip requests a server does not support (a missing entry
+ * means "not started yet" and the request is attempted, failing gracefully).
+ */
+const serverCapabilities = new Map<string, Record<string, unknown>>();
+
+/** Whether a language's server advertises a capability (unknown => try it). */
+export function serverSupports(languageId: string, capability: string): boolean {
+  const capabilities = serverCapabilities.get(languageId);
+  if (!capabilities) return true;
+  return Boolean(capabilities[capability]);
+}
+
 /** Non-ASCII-safe normalization of a workspace-backed model key:
  *  strips a Windows extended-length (`\\?\`, seen as `//?/`) prefix so open
  *  model keys match the clean paths LSP servers report back. Monaco may also
@@ -98,7 +119,7 @@ function uriFor(model: monaco.editor.ITextModel): string {
   return pathToFileUri(modelPath(model));
 }
 
-function findOpenModel(path: string): monaco.editor.ITextModel | undefined {
+export function findOpenModel(path: string): monaco.editor.ITextModel | undefined {
   const needle = normalizePathKey(path).toLowerCase();
   for (const { model } of docs.values()) {
     if (normalizePathKey(modelPath(model)).toLowerCase() === needle) {
@@ -120,7 +141,7 @@ function findOpenModel(path: string): monaco.editor.ITextModel | undefined {
  * that matches an already-open model so we never create a second tab for the
  * same physical file.
  */
-function matchOpenModelCase(path: string): string {
+export function matchOpenModelCase(path: string): string {
   const model = findOpenModel(path);
   if (!model) return path;
   const existing = modelPath(model);
@@ -132,7 +153,7 @@ function matchOpenModelCase(path: string): string {
 /** Whether a path belongs to the currently opened workspace. Windows paths are
  *  compared case-insensitively and normalized for separators and a verbatim
  *  (`\\?\`) / UNC prefix, mirroring the reveal helper used for navigation. */
-function isInsideWorkspace(path: string): boolean {
+export function isInsideWorkspace(path: string): boolean {
   const ws = useWorkspaceStore.getState().workspacePath;
   if (!ws) return false;
   const key = (p: string) =>
@@ -185,7 +206,13 @@ async function ensureServer(
 
   const start = (async () => {
     try {
-      await lspStart(language.id, triggerPath, serverCommand(language));
+      const result = await lspStart(language.id, triggerPath, serverCommand(language));
+      if (result.capabilities && typeof result.capabilities === "object") {
+        serverCapabilities.set(
+          language.id,
+          result.capabilities as Record<string, unknown>,
+        );
+      }
       activeLanguages.add(language.id);
       return true;
     } catch (err) {
@@ -215,6 +242,7 @@ function openDocCount(languageId: string): number {
 function resetLanguage(language: LspLanguage): void {
   activeLanguages.delete(language.id);
   startGates.delete(language.id);
+  serverCapabilities.delete(language.id);
 
   for (const [uri, doc] of [...docs]) {
     if (doc.language !== language.id) continue;
@@ -478,6 +506,264 @@ async function jumpToDefinition(
   await openAndReveal(path, target.line, target.column);
 }
 
+// --- Phase 12: capabilities, references, rename, signature, code actions, formatting ---
+
+interface LspParameterInformation {
+  label: string | [number, number];
+  documentation?: string | { value?: string };
+}
+
+interface LspSignatureInformation {
+  label: string;
+  documentation?: string | { value?: string };
+  parameters?: LspParameterInformation[];
+  activeParameter?: number;
+}
+
+interface LspSignatureHelp {
+  signatures?: LspSignatureInformation[];
+  activeSignature?: number;
+  activeParameter?: number;
+}
+
+interface LspCommand {
+  title?: string;
+  command: string;
+  arguments?: unknown[];
+}
+
+interface LspCodeAction {
+  title?: string;
+  kind?: string;
+  edit?: LspWorkspaceEdit;
+  command?: LspCommand;
+  isPreferred?: boolean;
+  disabled?: { reason?: string } | string;
+}
+
+/** Monaco code-action command id; the handler applies the LSP payload. */
+const CODE_ACTION_COMMAND = "liteide.applyCodeAction";
+
+/** One LSP location/{{LocationLink}} as a Monaco location (null when unusable). */
+function toMonacoLocation(
+  loc: LspLocation,
+): monaco.languages.Location | null {
+  const uri = loc.uri ?? loc.targetUri;
+  const range = loc.range ?? loc.targetSelectionRange ?? loc.targetRange;
+  const path = uri ? fileUriToPath(uri) : undefined;
+  if (!path || !range) return null;
+  return {
+    uri: monaco.Uri.file(matchOpenModelCase(path)),
+    range: lspRangeToMonaco(range),
+  };
+}
+
+/** Hover/signature documentation value -> Monaco markdown (or undefined). */
+function toMarkdownString(
+  value: string | { value?: string } | undefined,
+): monaco.IMarkdownString | undefined {
+  if (typeof value === "string") return { value, isTrusted: false };
+  if (value && typeof value.value === "string") {
+    return { value: value.value, isTrusted: false };
+  }
+  return undefined;
+}
+
+/** A rename rejection carrying only a reason (Monaco checks `rejectReason`). */
+function renameRejection(
+  reason: string,
+): monaco.languages.RenameLocation & monaco.languages.Rejection {
+  return { range: new monaco.Range(1, 1, 1, 1), text: "", rejectReason: reason };
+}
+
+/** Word-under-cursor fallback when the server has no prepareRename support. */
+function wordRenameLocation(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): monaco.languages.RenameLocation & monaco.languages.Rejection {
+  const word = model.getWordAtPosition(position);
+  if (!word) return renameRejection("该位置没有可重命名的符号");
+  return {
+    range: new monaco.Range(
+      position.lineNumber,
+      word.startColumn,
+      position.lineNumber,
+      word.endColumn,
+    ),
+    text: word.word,
+  };
+}
+
+/** Formatting options: prefer the app's editor settings over Monaco's. */
+function formattingOptions(
+  options: monaco.languages.FormattingOptions,
+): { tabSize: number; insertSpaces: boolean } {
+  const editor = useConfigStore.getState().editor as
+    | { tabSize?: number; insertSpaces?: boolean }
+    | undefined;
+  return {
+    tabSize:
+      typeof editor?.tabSize === "number" ? editor.tabSize : options.tabSize,
+    insertSpaces:
+      typeof editor?.insertSpaces === "boolean"
+        ? editor.insertSpaces
+        : options.insertSpaces ?? true,
+  };
+}
+
+/** Run an LSP `workspace/executeCommand`; apply a returned WorkspaceEdit. */
+async function executeLspCommand(
+  languageId: string,
+  command: LspCommand,
+): Promise<void> {
+  if (!languageById(languageId)) return;
+  try {
+    const result = await lspRequest(languageId, "workspace/executeCommand", {
+      command: command.command,
+      arguments: command.arguments ?? [],
+    });
+    if (
+      result &&
+      typeof result === "object" &&
+      ("changes" in (result as object) || "documentChanges" in (result as object))
+    ) {
+      await applyWorkspaceEdit(result as LspWorkspaceEdit);
+    }
+  } catch (err) {
+    useUiStore
+      .getState()
+      .showToast(`执行命令失败: ${String(err)}`, "error");
+  }
+}
+
+/** Apply a code action's edit (if any) then run its command (if any). */
+async function runCodeAction(
+  languageId: string,
+  edit: LspWorkspaceEdit | null,
+  command: LspCommand | null,
+): Promise<void> {
+  if (edit) await applyWorkspaceEdit(edit);
+  if (command) await executeLspCommand(languageId, command);
+}
+
+/** Wrap one LSP CodeAction/Command so accepting it runs through our applier. */
+function toMonacoCodeAction(
+  languageId: string,
+  raw: LspCodeAction,
+): monaco.languages.CodeAction | null {
+  const title = typeof raw.title === "string" ? raw.title : undefined;
+  const edit = raw.edit ?? null;
+  const command = raw.command ?? null;
+  if (!title || (!edit && !command)) return null;
+
+  const action: monaco.languages.CodeAction = {
+    title,
+    kind: typeof raw.kind === "string" ? raw.kind : undefined,
+    isPreferred: raw.isPreferred === true ? true : undefined,
+    command: {
+      id: CODE_ACTION_COMMAND,
+      title,
+      arguments: [languageId, edit, command],
+    },
+  };
+  if (raw.disabled) {
+    action.disabled =
+      typeof raw.disabled === "string"
+        ? raw.disabled
+        : raw.disabled.reason ?? "不可用";
+  }
+  return action;
+}
+
+/** Whether any Monaco editor currently owns keyboard focus. */
+export function editorHasTextFocus(): boolean {
+  return monaco.editor.getEditors()[0]?.hasTextFocus() ?? false;
+}
+
+/** F2: run Monaco's rename (which drives the registered rename provider). */
+export function runRenameAction(): void {
+  void monaco.editor.getEditors()[0]?.getAction("editor.action.rename")?.run();
+}
+
+/** Ctrl+.: open Monaco's quick-fix widget (drives our code-action provider). */
+export function runCodeActionAction(): void {
+  void monaco.editor.getEditors()[0]?.getAction("editor.action.quickFix")?.run();
+}
+
+/** Shift+Alt+F: format the document, with a clear notice when unsupported. */
+export function runFormatDocumentAction(): void {
+  const editor = monaco.editor.getEditors()[0];
+  const model = editor?.getModel();
+  const language = model ? languageForModel(model) : undefined;
+  if (
+    language &&
+    serverSupports(language.id, "documentFormattingProvider") === false
+  ) {
+    useUiStore
+      .getState()
+      .showToast("Formatting is not supported by the language server", "error");
+    return;
+  }
+  void editor?.getAction("editor.action.formatDocument")?.run();
+}
+
+/**
+ * Shift+F12: resolve references for the symbol under the cursor and show them
+ * in the secondary sidebar. Falls back to a plain notice when the language or
+ * server has no reference support.
+ */
+export async function findReferencesAtCursor(): Promise<void> {
+  const editor = monaco.editor.getEditors()[0];
+  const model = editor?.getModel();
+  const position = editor?.getPosition();
+  if (!editor || !model || !position) return;
+
+  const language = languageForModel(model);
+  if (!language) {
+    useUiStore.getState().showToast("No references available", "error");
+    return;
+  }
+  if (serverSupports(language.id, "referencesProvider") === false) {
+    useUiStore.getState().showToast("No references available", "error");
+    return;
+  }
+
+  const search = useSearchStore.getState();
+  search.beginReferences(model.getWordAtPosition(position)?.word ?? "");
+  const workspace = useWorkspaceStore.getState().workspacePath;
+
+  try {
+    const result = await lspRequest(language.id, "textDocument/references", {
+      textDocument: { uri: uriFor(model) },
+      position: monacoPositionToLsp(position.lineNumber, position.column),
+      context: { includeDeclaration: true },
+    });
+    if (useWorkspaceStore.getState().workspacePath !== workspace) return;
+    const items: ReferenceItem[] = [];
+    if (Array.isArray(result)) {
+      for (const raw of result) {
+        const loc = raw as LspLocation;
+        const uri = loc.uri ?? loc.targetUri;
+        const range = loc.range ?? loc.targetSelectionRange ?? loc.targetRange;
+        const path = uri ? fileUriToPath(uri) : undefined;
+        if (!path || !range) continue;
+        const line = range.start.line + 1;
+        const column = range.start.character + 1;
+        const target = findOpenModel(path);
+        const preview =
+          target && !target.isDisposed()
+            ? (target.getLineContent(line) ?? "").trim()
+            : "";
+        items.push({ path, line, column, preview });
+      }
+    }
+    useSearchStore.getState().finishReferences(items);
+  } catch {
+    if (useWorkspaceStore.getState().workspacePath !== workspace) return;
+    useSearchStore.getState().finishReferences([]);
+  }
+}
+
 // --- Registration ----------------------------------------------------------
 
 let registered = false;
@@ -630,6 +916,210 @@ export function registerLspClient(): void {
       }
     },
   });
+
+  // Find References (Shift+F12). Registered so Monaco's own peek works too;
+  // our sidebar flow goes through `findReferencesAtCursor`.
+  monaco.languages.registerReferenceProvider(LSP_MONACO_SELECTOR, {
+    async provideReferences(model, position, context, token) {
+      const language = languageForModel(model);
+      if (!language) return [];
+      if (serverSupports(language.id, "referencesProvider") === false) return [];
+      try {
+        const result = await lspRequest(language.id, "textDocument/references", {
+          textDocument: { uri: uriFor(model) },
+          position: monacoPositionToLsp(position.lineNumber, position.column),
+          context: { includeDeclaration: context.includeDeclaration },
+        });
+        if (token.isCancellationRequested || !Array.isArray(result)) return [];
+        return (result as LspLocation[])
+          .map(toMonacoLocation)
+          .filter((loc): loc is monaco.languages.Location => loc !== null);
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  // Rename (F2). Monaco's built-in rename input drives this; the provider
+  // returns a Monaco WorkspaceEdit whose resources are the real open models
+  // (the file is opened first so multi-file renames work).
+  monaco.languages.registerRenameProvider(LSP_MONACO_SELECTOR, {
+    async resolveRenameLocation(model, position, token) {
+      const language = languageForModel(model);
+      if (!language) return null;
+      if (serverSupports(language.id, "renameProvider") === false) {
+        return renameRejection("Rename is not supported by the language server");
+      }
+      try {
+        const result = await lspRequest(language.id, "textDocument/prepareRename", {
+          textDocument: { uri: uriFor(model) },
+          position: monacoPositionToLsp(position.lineNumber, position.column),
+        });
+        if (token.isCancellationRequested) return null;
+        if (!result) return wordRenameLocation(model, position);
+        const info = result as { range?: LspRange; placeholder?: string };
+        if (!info.range) return wordRenameLocation(model, position);
+        const range = lspRangeToMonaco(info.range);
+        return {
+          range,
+          text: info.placeholder ?? model.getValueInRange(range),
+        };
+      } catch {
+        // prepareRename unsupported: fall back to the word under the cursor.
+        return wordRenameLocation(model, position);
+      }
+    },
+    async provideRenameEdits(model, position, newName, token) {
+      const language = languageForModel(model);
+      if (!language) return { edits: [], rejectReason: "当前文件不支持重命名" };
+      if (serverSupports(language.id, "renameProvider") === false) {
+        return { edits: [], rejectReason: "Rename is not supported by the language server" };
+      }
+      try {
+        const result = await lspRequest(language.id, "textDocument/rename", {
+          textDocument: { uri: uriFor(model) },
+          position: monacoPositionToLsp(position.lineNumber, position.column),
+          newName,
+        });
+        if (token.isCancellationRequested) return null;
+        if (!result) return { edits: [] };
+        return await buildMonacoWorkspaceEdit(result as LspWorkspaceEdit);
+      } catch (err) {
+        return { edits: [], rejectReason: String(err) };
+      }
+    },
+  });
+
+  // Signature Help: auto-triggered on "(" and ",".
+  monaco.languages.registerSignatureHelpProvider(LSP_MONACO_SELECTOR, {
+    signatureHelpTriggerCharacters: ["(", ","],
+    signatureHelpRetriggerCharacters: [","],
+    async provideSignatureHelp(model, position, token, context) {
+      const language = languageForModel(model);
+      if (!language) return null;
+      if (serverSupports(language.id, "signatureHelpProvider") === false) return null;
+      try {
+        const result = await lspRequest(language.id, "textDocument/signatureHelp", {
+          textDocument: { uri: uriFor(model) },
+          position: monacoPositionToLsp(position.lineNumber, position.column),
+          context: {
+            triggerKind: context.triggerKind,
+            triggerCharacter: context.triggerCharacter ?? null,
+            isRetrigger: context.isRetrigger,
+            activeSignatureHelp: context.activeSignatureHelp ?? null,
+          },
+        });
+        if (token.isCancellationRequested || !result) return null;
+        const help = result as LspSignatureHelp;
+        const signatures = Array.isArray(help.signatures) ? help.signatures : [];
+        if (signatures.length === 0) return null;
+        const value: monaco.languages.SignatureHelp = {
+          signatures: signatures.map((signature) => ({
+            label: signature.label,
+            documentation: toMarkdownString(signature.documentation),
+            parameters: (signature.parameters ?? []).map((parameter) => ({
+              label: parameter.label,
+              documentation: toMarkdownString(parameter.documentation),
+            })),
+            activeParameter: signature.activeParameter,
+          })),
+          activeSignature:
+            typeof help.activeSignature === "number" ? help.activeSignature : 0,
+          activeParameter:
+            typeof help.activeParameter === "number" ? help.activeParameter : 0,
+        };
+        return { value, dispose() {} };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  // Code Actions (Ctrl+.). Every action is wrapped as a Monaco command that
+  // applies the edit through `applyWorkspaceEdit` / `workspace/executeCommand`.
+  monaco.languages.registerCodeActionProvider(LSP_MONACO_SELECTOR, {
+    async provideCodeActions(model, range, context, token) {
+      const language = languageForModel(model);
+      if (!language) return { actions: [], dispose() {} };
+      if (serverSupports(language.id, "codeActionProvider") === false) {
+        return { actions: [], dispose() {} };
+      }
+      try {
+        const result = await lspRequest(language.id, "textDocument/codeAction", {
+          textDocument: { uri: uriFor(model) },
+          range: monacoRangeToLsp(range),
+          context: {
+            diagnostics: context.markers.map(monacoMarkerToLspDiagnostic),
+            only: context.only ? [context.only] : undefined,
+            triggerKind: context.trigger,
+          },
+        });
+        if (token.isCancellationRequested || !Array.isArray(result)) {
+          return { actions: [], dispose() {} };
+        }
+        const actions: monaco.languages.CodeAction[] = [];
+        for (const raw of result as LspCodeAction[]) {
+          const action = toMonacoCodeAction(language.id, raw);
+          if (action) actions.push(action);
+        }
+        return { actions, dispose() {} };
+      } catch {
+        return { actions: [], dispose() {} };
+      }
+    },
+  });
+
+  // Formatting (Shift+Alt+F) and range formatting.
+  monaco.languages.registerDocumentFormattingEditProvider(LSP_MONACO_SELECTOR, {
+    displayName: "lsp",
+    async provideDocumentFormattingEdits(model, options, token) {
+      const language = languageForModel(model);
+      if (!language) return null;
+      if (serverSupports(language.id, "documentFormattingProvider") === false) return null;
+      try {
+        const result = await lspRequest(language.id, "textDocument/formatting", {
+          textDocument: { uri: uriFor(model) },
+          options: formattingOptions(options),
+        });
+        if (token.isCancellationRequested || !Array.isArray(result)) return null;
+        return (result as LspTextEdit[]).map(lspTextEditToMonaco);
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  monaco.languages.registerDocumentRangeFormattingEditProvider(LSP_MONACO_SELECTOR, {
+    displayName: "lsp",
+    async provideDocumentRangeFormattingEdits(model, range, options, token) {
+      const language = languageForModel(model);
+      if (!language) return null;
+      if (serverSupports(language.id, "documentRangeFormattingProvider") === false) return null;
+      try {
+        const result = await lspRequest(language.id, "textDocument/rangeFormatting", {
+          textDocument: { uri: uriFor(model) },
+          range: monacoRangeToLsp(range),
+          options: formattingOptions(options),
+        });
+        if (token.isCancellationRequested || !Array.isArray(result)) return null;
+        return (result as LspTextEdit[]).map(lspTextEditToMonaco);
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  monaco.editor.registerCommand(
+    CODE_ACTION_COMMAND,
+    (
+      _accessor: unknown,
+      languageId: string,
+      edit: LspWorkspaceEdit | null,
+      command: LspCommand | null,
+    ) => {
+      void runCodeAction(languageId, edit, command);
+    },
+  );
 
   void listen<{
     language: string;
