@@ -5,6 +5,7 @@ import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useSearchStore } from "../../stores/searchStore";
+import { isPathInsideWorkspace } from "../../utils/pathIdentity";
 import TreeNode from "./TreeNode";
 import FolderIcon from "./FolderIcon";
 import ContextMenu, { type ContextMenuAction } from "./ContextMenu";
@@ -44,6 +45,7 @@ function FileTree({ onCollapse }: FileTreeProps) {
   const renameEntry = useFileTreeStore((s) => s.renameEntry);
   const deleteEntry = useFileTreeStore((s) => s.deleteEntry);
   const openFile = useEditorStore((s) => s.openFile);
+  const openExternalFile = useEditorStore((s) => s.openExternalFile);
 
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [newMenu, setNewMenu] = useState<NewMenuState | null>(null);
@@ -68,6 +70,20 @@ function FileTree({ onCollapse }: FileTreeProps) {
     const dir = Array.isArray(selected) ? selected[0] : selected;
     if (dir) {
       await openWorkspace(dir);
+    }
+  }
+
+  // Open a single file from a native picker. Workspace files go through the
+  // normal editor path (writable); files outside the workspace reuse the
+  // existing read-only external-file path. Cancelling does nothing.
+  async function openFileDialog() {
+    const selected = await open({ multiple: false, directory: false });
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    if (!path) return;
+    if (isPathInsideWorkspace(path, workspacePath)) {
+      await openFile(path);
+    } else {
+      await openExternalFile(path);
     }
   }
 
@@ -165,6 +181,29 @@ function FileTree({ onCollapse }: FileTreeProps) {
             }}
           >
             +
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="打开文件"
+            onClick={() => void openFileDialog()}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M4 1.5h5.5L12.5 4.5v10H4z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9.5 1.5v3h3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
           <button
             type="button"
