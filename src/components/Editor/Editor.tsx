@@ -2,7 +2,14 @@ import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
 import { useEditorStore } from "../../stores/editorStore";
 import { useConfigStore } from "../../stores/configStore";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { getModel } from "../../editor/modelStore";
+import {
+  autoSaveOnFocusChange,
+  autoSaveOnWindowChange,
+  cancelAutoSave,
+  scheduleAutoSave,
+} from "../../utils/autoSave";
 
 function Editor() {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -61,6 +68,10 @@ function Editor() {
         lastPush = 0;
         pushCursor();
       }),
+      // Auto Save: re-arm the "After Delay" timer on every edit, and save when
+      // the editor loses focus if "On Focus Change" is enabled.
+      editor.onDidChangeModelContent(() => scheduleAutoSave()),
+      editor.onDidBlurEditorWidget(() => autoSaveOnFocusChange()),
     ];
 
     return () => {
@@ -96,6 +107,41 @@ function Editor() {
     };
     apply();
     return useConfigStore.subscribe(apply);
+  }, []);
+
+  // Auto Save: the app window losing focus is one of the triggers.
+  useEffect(() => {
+    window.addEventListener("blur", autoSaveOnWindowChange);
+    return () => window.removeEventListener("blur", autoSaveOnWindowChange);
+  }, []);
+
+  // Auto Save: drop any pending "After Delay" timer when the workspace changes,
+  // so it can never save into the next workspace.
+  const workspacePath = useWorkspaceStore((s) => s.workspacePath);
+  useEffect(() => () => cancelAutoSave(), [workspacePath]);
+
+  // Editor: Mouse Wheel Zoom. Resizes the Monaco font (8..40, step 1) on
+  // Ctrl/Cmd + wheel. The listener is scoped to the editor host so the
+  // Explorer / Terminal / Sidebar are unaffected and no page zoom happens.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // Swallow the event so neither the webview nor Monaco zoom/scrolls it.
+      e.preventDefault();
+      e.stopPropagation();
+      const store = useConfigStore.getState();
+      if (!store.editor.mouseWheelZoom) return;
+      const step = e.deltaY > 0 ? -1 : 1;
+      const next = Math.min(40, Math.max(8, store.editor.fontSize + step));
+      if (next !== store.editor.fontSize) {
+        void store.updateEditor({ fontSize: next });
+      }
+    };
+    host.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () =>
+      host.removeEventListener("wheel", onWheel, { capture: true });
   }, []);
 
   useEffect(() => {

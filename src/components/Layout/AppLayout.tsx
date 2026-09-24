@@ -28,6 +28,7 @@ import {
   runCodeActionAction,
   runFormatDocumentAction,
   runRenameAction,
+  runSignatureHelpAction,
 } from "../../lsp/client";
 import {
   isDoubleCtrlChord,
@@ -35,6 +36,7 @@ import {
   chordMatches,
   type KeybindingAction,
 } from "../../config/keybindings";
+import { cancelAutoSave } from "../../utils/autoSave";
 
 const MIN_TREE_WIDTH = 180;
 const MAX_TREE_WIDTH = 500;
@@ -134,6 +136,8 @@ function AppLayout() {
     let cancelled = false;
     void getCurrentWindow()
       .onCloseRequested((event) => {
+        // A pending Auto Save timer must not fire while the close flow runs.
+        cancelAutoSave();
         if (!useConfigStore.getState().general.confirmBeforeClose) return;
         const dirty = useEditorStore
           .getState()
@@ -361,6 +365,12 @@ function AppLayout() {
         e.preventDefault();
         e.stopPropagation();
         runFormatDocumentAction();
+        return;
+      }
+      if (match("signatureHelp")) {
+        e.preventDefault();
+        e.stopPropagation();
+        runSignatureHelpAction();
       }
     };
     window.addEventListener("keydown", onKeyDownCapture, true);

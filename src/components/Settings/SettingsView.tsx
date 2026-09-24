@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useConfigStore } from "../../stores/configStore";
 import GeneralSection from "./GeneralSection";
 import EditorSection from "./EditorSection";
+import FilesSection from "./FilesSection";
 import TerminalSection from "./TerminalSection";
 import TasksSection from "./TasksSection";
 import KeyboardSection from "./KeyboardSection";
@@ -9,6 +10,7 @@ import KeyboardSection from "./KeyboardSection";
 type SettingsSection =
   | "general"
   | "editor"
+  | "files"
   | "terminal"
   | "tasks"
   | "keyboard";
@@ -16,6 +18,7 @@ type SettingsSection =
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "general", label: "通用" },
   { id: "editor", label: "编辑器" },
+  { id: "files", label: "文件" },
   { id: "terminal", label: "终端" },
   { id: "tasks", label: "任务" },
   { id: "keyboard", label: "键盘快捷键" },
@@ -58,6 +61,7 @@ function SettingsView() {
         <div className="settings-content">
           {section === "general" && <GeneralSection />}
           {section === "editor" && <EditorSection />}
+          {section === "files" && <FilesSection />}
           {section === "terminal" && <TerminalSection />}
           {section === "tasks" && <TasksSection />}
           {section === "keyboard" && <KeyboardSection />}

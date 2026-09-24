@@ -285,6 +285,24 @@ async function pushChanges(
   }
 }
 
+/**
+ * Send any debounced `didChange` for a model right away. Monaco's parameter
+ * hints fire ~120ms after typing, which is faster than the 150ms change
+ * debounce, so without this the server would answer `signatureHelp` against a
+ * stale document (missing the `(` / `,` just typed) and return nothing.
+ */
+async function flushPendingChanges(
+  model: monaco.editor.ITextModel,
+  languageId: string,
+): Promise<void> {
+  const uri = uriFor(model);
+  const timer = changeTimers.get(uri);
+  if (timer === undefined) return;
+  window.clearTimeout(timer);
+  changeTimers.delete(uri);
+  await pushChanges(model, uri, languageId);
+}
+
 /** Send `didOpen` for a new served model (idempotent per URI). */
 async function openDocModel(model: monaco.editor.ITextModel): Promise<void> {
   const language = languageForModel(model);
@@ -666,9 +684,17 @@ export function runRenameAction(): void {
   void monaco.editor.getEditors()[0]?.getAction("editor.action.rename")?.run();
 }
 
-/** Ctrl+.: open Monaco's quick-fix widget (drives our code-action provider). */
+/** Ctrl+. : open Monaco's quick-fix widget (drives our code-action provider). */
 export function runCodeActionAction(): void {
   void monaco.editor.getEditors()[0]?.getAction("editor.action.quickFix")?.run();
+}
+
+/** Ctrl+Shift+Space: trigger Monaco's native parameter-hints widget. */
+export function runSignatureHelpAction(): void {
+  void monaco.editor
+    .getEditors()[0]
+    ?.getAction("editor.action.triggerParameterHints")
+    ?.run();
 }
 
 /** Shift+Alt+F: format the document, with a clear notice when unsupported. */
@@ -980,6 +1006,8 @@ export function registerLspClient(): void {
       if (!language) return null;
       if (serverSupports(language.id, "signatureHelpProvider") === false) return null;
       try {
+        // Sync the just-typed trigger character before asking the server.
+        await flushPendingChanges(model, language.id);
         const result = await lspRequest(language.id, "textDocument/signatureHelp", {
           textDocument: { uri: uriFor(model) },
           position: monacoPositionToLsp(position.lineNumber, position.column),

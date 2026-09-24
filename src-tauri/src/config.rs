@@ -23,6 +23,7 @@ const KEYBINDING_DEFAULTS: &[(&str, &str)] = &[
     ("findReferences", "Shift+F12"),
     ("codeActions", "Ctrl+."),
     ("formatDocument", "Shift+Alt+F"),
+    ("signatureHelp", "Ctrl+Shift+Space"),
 ];
 
 const USER_CONFIG_FILE: &str = "user.json";
@@ -43,6 +44,8 @@ pub struct UserConfigFile {
     pub general: GeneralConfigFile,
     #[serde(default)]
     pub lsp: LspConfigFile,
+    #[serde(default)]
+    pub files: FilesConfigFile,
 }
 
 /// Per-language language-server invocation stored in `user.json`. Missing parts
@@ -79,6 +82,30 @@ pub struct EditorConfigFile {
     pub word_wrap: Option<String>,
     #[serde(default)]
     pub minimap: Option<bool>,
+    #[serde(default)]
+    pub mouse_wheel_zoom: Option<bool>,
+}
+
+/// `files.autoSave`: each trigger is independent, so any enabled trigger saves
+/// the dirty editors (VS Code's single-choice setting is split into flags here).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSaveConfigFile {
+    #[serde(default)]
+    pub after_delay: Option<bool>,
+    #[serde(default)]
+    pub on_focus_change: Option<bool>,
+    #[serde(default)]
+    pub on_window_change: Option<bool>,
+    #[serde(default)]
+    pub delay: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesConfigFile {
+    #[serde(default)]
+    pub auto_save: AutoSaveConfigFile,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -110,6 +137,7 @@ pub struct UserConfig {
     pub terminal: TerminalSettings,
     pub general: GeneralSettings,
     pub lsp: LspSettings,
+    pub files: FilesSettings,
     pub config_dir: String,
     pub notice: Option<String>,
 }
@@ -121,6 +149,7 @@ pub struct EditorSettings {
     pub tab_size: u32,
     pub word_wrap: String,
     pub minimap: bool,
+    pub mouse_wheel_zoom: bool,
 }
 
 impl Default for EditorSettings {
@@ -130,6 +159,41 @@ impl Default for EditorSettings {
             tab_size: 2,
             word_wrap: "off".to_string(),
             minimap: false,
+            mouse_wheel_zoom: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoSaveSettings {
+    pub after_delay: bool,
+    pub on_focus_change: bool,
+    pub on_window_change: bool,
+    pub delay: u32,
+}
+
+impl Default for AutoSaveSettings {
+    fn default() -> Self {
+        Self {
+            after_delay: false,
+            on_focus_change: false,
+            on_window_change: false,
+            delay: 1000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilesSettings {
+    pub auto_save: AutoSaveSettings,
+}
+
+impl Default for FilesSettings {
+    fn default() -> Self {
+        Self {
+            auto_save: AutoSaveSettings::default(),
         }
     }
 }
@@ -261,6 +325,13 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
     e.tab_size = Some(e.tab_size.unwrap_or(2).clamp(1, 16));
     e.word_wrap = Some(sanitize_word_wrap(e.word_wrap.as_deref().unwrap_or("off")));
     e.minimap = Some(e.minimap.unwrap_or(false));
+    e.mouse_wheel_zoom = Some(e.mouse_wheel_zoom.unwrap_or(false));
+
+    let a = &mut file.files.auto_save;
+    a.after_delay = Some(a.after_delay.unwrap_or(false));
+    a.on_focus_change = Some(a.on_focus_change.unwrap_or(false));
+    a.on_window_change = Some(a.on_window_change.unwrap_or(false));
+    a.delay = Some(a.delay.unwrap_or(1000).clamp(100, 60000));
 
     let t = &mut file.terminal;
     let shell = t
@@ -309,6 +380,7 @@ fn parse_user_config(text: &str) -> UserConfig {
                     tab_size: file.editor.tab_size.unwrap_or(2),
                     word_wrap: file.editor.word_wrap.unwrap_or_else(|| "off".to_string()),
                     minimap: file.editor.minimap.unwrap_or(false),
+                    mouse_wheel_zoom: file.editor.mouse_wheel_zoom.unwrap_or(false),
                 },
                 terminal: TerminalSettings {
                     default_shell: file
@@ -324,6 +396,14 @@ fn parse_user_config(text: &str) -> UserConfig {
                     confirm_before_close: file.general.confirm_before_close.unwrap_or(true),
                 },
                 lsp,
+                files: FilesSettings {
+                    auto_save: AutoSaveSettings {
+                        after_delay: file.files.auto_save.after_delay.unwrap_or(false),
+                        on_focus_change: file.files.auto_save.on_focus_change.unwrap_or(false),
+                        on_window_change: file.files.auto_save.on_window_change.unwrap_or(false),
+                        delay: file.files.auto_save.delay.unwrap_or(1000),
+                    },
+                },
                 config_dir: String::new(),
                 notice: None,
             }
@@ -334,6 +414,7 @@ fn parse_user_config(text: &str) -> UserConfig {
             terminal,
             general,
             lsp,
+            files: FilesSettings::default(),
             config_dir: String::new(),
             notice: Some("user.json 格式错误，已使用默认配置".to_string()),
         },
@@ -362,6 +443,7 @@ pub fn load(app: &AppHandle) -> UserConfig {
         terminal: TerminalSettings::default(),
         general: GeneralSettings::default(),
         lsp: LspSettings::default(),
+        files: FilesSettings::default(),
         config_dir: config_dir.clone(),
         notice: None,
     };
@@ -415,14 +497,15 @@ pub fn configured_shell(app: &AppHandle) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        defaults, parse_user_config, sanitize_file, EditorSettings, GeneralSettings,
-        LspSettings, TerminalSettings, UserConfig, UserConfigFile,
+        defaults, parse_user_config, sanitize_file, AutoSaveSettings, EditorSettings,
+        FilesSettings, GeneralSettings, LspSettings, TerminalSettings, UserConfig,
+        UserConfigFile,
     };
 
     #[test]
     fn defaults_cover_every_action() {
         let map = defaults();
-        assert_eq!(map.len(), 14);
+        assert_eq!(map.len(), 15);
         assert_eq!(map.get("toggleExplorer").map(String::as_str), Some("Ctrl+B"));
         assert_eq!(
             map.get("openTaskCenter").map(String::as_str),
@@ -487,10 +570,35 @@ mod tests {
         assert_eq!(cfg.editor.tab_size, 2);
         assert_eq!(cfg.editor.word_wrap, "off");
         assert!(!cfg.editor.minimap);
+        assert!(!cfg.editor.mouse_wheel_zoom);
         assert_eq!(cfg.terminal.default_shell, "auto");
         assert!(cfg.general.restore_last_workspace);
         assert!(cfg.general.confirm_before_close);
+        assert!(!cfg.files.auto_save.after_delay);
+        assert!(!cfg.files.auto_save.on_focus_change);
+        assert!(!cfg.files.auto_save.on_window_change);
+        assert_eq!(cfg.files.auto_save.delay, 1000);
         assert_eq!(cfg.notice, None);
+    }
+
+    #[test]
+    fn parses_mouse_wheel_zoom_and_auto_save() {
+        let cfg = parse_user_config(
+            r#"{"editor":{"mouseWheelZoom":true},"files":{"autoSave":{"afterDelay":true,"onFocusChange":true,"onWindowChange":false,"delay":500}}}"#,
+        );
+        assert!(cfg.editor.mouse_wheel_zoom);
+        assert!(cfg.files.auto_save.after_delay);
+        assert!(cfg.files.auto_save.on_focus_change);
+        assert!(!cfg.files.auto_save.on_window_change);
+        assert_eq!(cfg.files.auto_save.delay, 500);
+    }
+
+    #[test]
+    fn clamps_auto_save_delay() {
+        let low = parse_user_config(r#"{"files":{"autoSave":{"delay":10}}}"#);
+        assert_eq!(low.files.auto_save.delay, 100);
+        let high = parse_user_config(r#"{"files":{"autoSave":{"delay":999999}}}"#);
+        assert_eq!(high.files.auto_save.delay, 60000);
     }
 
     #[test]
@@ -516,9 +624,14 @@ mod tests {
         assert_eq!(file.editor.tab_size, Some(2));
         assert_eq!(file.editor.word_wrap.as_deref(), Some("off"));
         assert_eq!(file.editor.minimap, Some(false));
+        assert_eq!(file.editor.mouse_wheel_zoom, Some(false));
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
+        assert_eq!(file.files.auto_save.after_delay, Some(false));
+        assert_eq!(file.files.auto_save.on_focus_change, Some(false));
+        assert_eq!(file.files.auto_save.on_window_change, Some(false));
+        assert_eq!(file.files.auto_save.delay, Some(1000));
         assert_eq!(
             file.lsp.rust.as_ref().and_then(|s| s.command.as_deref()),
             Some("rust-analyzer")
@@ -581,7 +694,7 @@ mod tests {
     fn empty_user_json_falls_back_with_notice() {
         let cfg = parse_user_config("");
         assert!(cfg.notice.is_some());
-        assert_eq!(cfg.keybindings.len(), 14);
+        assert_eq!(cfg.keybindings.len(), 15);
     }
 
     #[test]
@@ -599,6 +712,7 @@ mod tests {
                 tab_size: 4,
                 word_wrap: "on".to_string(),
                 minimap: true,
+                mouse_wheel_zoom: true,
             },
             terminal: TerminalSettings {
                 default_shell: "cmd.exe".to_string(),
@@ -608,6 +722,14 @@ mod tests {
                 confirm_before_close: false,
             },
             lsp: LspSettings::default(),
+            files: FilesSettings {
+                auto_save: AutoSaveSettings {
+                    after_delay: true,
+                    on_focus_change: false,
+                    on_window_change: false,
+                    delay: 1000,
+                },
+            },
             config_dir: r"C:\Users\test\AppData\Roaming\com.longanl.lite-ide".to_string(),
             notice: None,
         };
@@ -619,11 +741,15 @@ mod tests {
         assert!(text.contains(r#""tabSize":4"#), "{text}");
         assert!(text.contains(r#""wordWrap":"on""#), "{text}");
         assert!(text.contains(r#""minimap":true"#), "{text}");
+        assert!(text.contains(r#""mouseWheelZoom":true"#), "{text}");
         assert!(text.contains(r#""defaultShell":"cmd.exe""#), "{text}");
         assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
         assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");
+        assert!(text.contains(r#""autoSave":{"afterDelay":true"#), "{text}");
+        assert!(text.contains(r#""delay":1000"#), "{text}");
         assert!(text.contains(r#""typescript":{"command":"typescript-language-server","args":["--stdio"]}"#), "{text}");
         assert!(!text.contains("config_dir"), "{text}");
         assert!(!text.contains("font_size"), "{text}");
+        assert!(!text.contains("mouse_wheel_zoom"), "{text}");
     }
 }

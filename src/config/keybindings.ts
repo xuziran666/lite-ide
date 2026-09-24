@@ -14,6 +14,7 @@ export const KEYBINDING_ACTIONS = [
   "findReferences",
   "codeActions",
   "formatDocument",
+  "signatureHelp",
 ] as const;
 
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
@@ -36,6 +37,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   findReferences: "Shift+F12",
   codeActions: "Ctrl+.",
   formatDocument: "Shift+Alt+F",
+  signatureHelp: "Ctrl+Shift+Space",
 };
 
 /**
@@ -124,6 +126,7 @@ export const KEYBINDING_LABELS: Record<KeybindingAction, string> = {
   findReferences: "Find References",
   codeActions: "Code Actions",
   formatDocument: "Format Document",
+  signatureHelp: "Signature Help",
 };
 
 /**

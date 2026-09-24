@@ -101,6 +101,7 @@ export interface EditorSettings {
   tabSize: number;
   wordWrap: string;
   minimap: boolean;
+  mouseWheelZoom: boolean;
 }
 
 export interface TerminalSettings {
@@ -110,6 +111,21 @@ export interface TerminalSettings {
 export interface GeneralSettings {
   restoreLastWorkspace: boolean;
   confirmBeforeClose: boolean;
+}
+
+/**
+ * `files.autoSave`: each trigger is independent (unlike VS Code's single
+ * choice), so any enabled trigger saves the dirty editors.
+ */
+export interface AutoSaveSettings {
+  afterDelay: boolean;
+  onFocusChange: boolean;
+  onWindowChange: boolean;
+  delay: number;
+}
+
+export interface FilesSettings {
+  autoSave: AutoSaveSettings;
 }
 
 /** A resolved language-server invocation (executable + argv). */
@@ -131,6 +147,7 @@ export interface UserConfig {
   terminal: TerminalSettings;
   general: GeneralSettings;
   lsp: LspConfig;
+  files: FilesSettings;
   configDir: string;
   notice: string | null;
 }
@@ -142,6 +159,7 @@ export interface UserConfigPatch {
   terminal: TerminalSettings;
   general: GeneralSettings;
   lsp: LspConfig;
+  files: FilesSettings;
 }
 
 /** The user configuration merged over the built-in defaults; always resolves. */

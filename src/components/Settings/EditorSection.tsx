@@ -76,6 +76,21 @@ function EditorSection() {
           onChange={(e) => void updateEditor({ minimap: e.target.checked })}
         />
       </label>
+      <label className="settings-field settings-check">
+        <span className="settings-check-text">
+          <span className="settings-label">Ctrl + 滚轮缩放</span>
+          <span className="settings-detail">
+            按住 Ctrl（macOS 为 Cmd）滚动鼠标滚轮时调整编辑器字号（8–40）。
+          </span>
+        </span>
+        <input
+          type="checkbox"
+          checked={editor.mouseWheelZoom}
+          onChange={(e) =>
+            void updateEditor({ mouseWheelZoom: e.target.checked })
+          }
+        />
+      </label>
       <p className="settings-hint">以上修改会立即应用到当前已打开的编辑器。</p>
     </div>
   );

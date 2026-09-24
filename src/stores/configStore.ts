@@ -5,7 +5,9 @@ import {
   setUserConfig,
 } from "../commands";
 import type {
+  AutoSaveSettings,
   EditorSettings,
+  FilesSettings,
   GeneralSettings,
   LspConfig,
   TerminalSettings,
@@ -27,6 +29,7 @@ const DEFAULT_EDITOR: EditorSettings = {
   tabSize: 2,
   wordWrap: "off",
   minimap: false,
+  mouseWheelZoom: false,
 };
 
 const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };
@@ -35,6 +38,20 @@ const DEFAULT_GENERAL: GeneralSettings = {
   restoreLastWorkspace: true,
   confirmBeforeClose: true,
 };
+
+const DEFAULT_FILES: FilesSettings = {
+  autoSave: {
+    afterDelay: false,
+    onFocusChange: false,
+    onWindowChange: false,
+    delay: 1000,
+  },
+};
+
+/** Deep-clone the files config so persisted patches never share nested objects. */
+function cloneFiles(files: FilesSettings): FilesSettings {
+  return { autoSave: { ...files.autoSave } };
+}
 
 const DEFAULT_LSP: LspConfig = {
   rust: { command: "rust-analyzer", args: [] },
@@ -61,6 +78,7 @@ interface ConfigStore {
   terminal: TerminalSettings;
   general: GeneralSettings;
   lsp: LspConfig;
+  files: FilesSettings;
   shells: string[];
   configDir: string;
   settingsOpen: boolean;
@@ -72,6 +90,7 @@ interface ConfigStore {
   updateEditor: (patch: Partial<EditorSettings>) => Promise<void>;
   updateTerminal: (patch: Partial<TerminalSettings>) => Promise<void>;
   updateGeneral: (patch: Partial<GeneralSettings>) => Promise<void>;
+  updateAutoSave: (patch: Partial<AutoSaveSettings>) => Promise<void>;
   /**
    * Persist a single keybinding, running duplicate detection across the other
    * actions. Resolves false when another action already owns the chord.
@@ -89,6 +108,7 @@ const baseConfig = (): UserConfigPatch => ({
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
   lsp: cloneLsp(DEFAULT_LSP),
+  files: cloneFiles(DEFAULT_FILES),
 });
 
 export const useConfigStore = create<ConfigStore>((set, get) => ({
@@ -98,6 +118,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
   lsp: cloneLsp(DEFAULT_LSP),
+  files: cloneFiles(DEFAULT_FILES),
   shells: [],
   configDir: "",
   settingsOpen: false,
@@ -116,6 +137,9 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
           rust: { ...DEFAULT_LSP.rust, ...config.lsp?.rust },
           cpp: { ...DEFAULT_LSP.cpp, ...config.lsp?.cpp },
           typescript: { ...DEFAULT_LSP.typescript, ...config.lsp?.typescript },
+        },
+        files: {
+          autoSave: { ...DEFAULT_FILES.autoSave, ...config.files?.autoSave },
         },
         configDir: config.configDir,
         notice: config.notice,
@@ -142,6 +166,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
+    full.files = cloneFiles(state.files);
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -159,6 +184,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.terminal = { ...terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
+    full.files = cloneFiles(state.files);
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -176,6 +202,28 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.terminal = { ...state.terminal };
     full.general = { ...general };
     full.lsp = cloneLsp(state.lsp);
+    full.files = cloneFiles(state.files);
+    try {
+      await setUserConfig(full);
+    } catch (err) {
+      useUiStore.getState().showToast(`保存配置失败: ${String(err)}`, "error");
+    }
+  },
+
+  updateAutoSave: async (patch) => {
+    const current = get().files;
+    const files: FilesSettings = {
+      autoSave: { ...current.autoSave, ...patch },
+    };
+    set({ files });
+    const state = get();
+    const full = baseConfig();
+    full.keybindings = { ...state.keybindings };
+    full.editor = { ...state.editor };
+    full.terminal = { ...state.terminal };
+    full.general = { ...state.general };
+    full.lsp = cloneLsp(state.lsp);
+    full.files = files;
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -208,6 +256,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
     full.lsp = cloneLsp(state.lsp);
+    full.files = cloneFiles(state.files);
     try {
       await setUserConfig(full);
       return { ok: true };
