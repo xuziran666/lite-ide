@@ -81,6 +81,14 @@ pub struct GuidesConfigFile {
     pub indentation: Option<bool>,
 }
 
+/// `editor.bracketPairColorization.*` in `user.json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BracketPairColorizationConfigFile {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditorConfigFile {
@@ -114,6 +122,24 @@ pub struct EditorConfigFile {
     pub cursor_style: Option<String>,
     #[serde(default)]
     pub cursor_blinking: Option<String>,
+    #[serde(default)]
+    pub format_on_paste: Option<bool>,
+    #[serde(default)]
+    pub format_on_type: Option<bool>,
+    #[serde(default)]
+    pub auto_closing_brackets: Option<String>,
+    #[serde(default)]
+    pub auto_closing_quotes: Option<String>,
+    #[serde(default)]
+    pub auto_surround: Option<String>,
+    #[serde(default)]
+    pub trim_auto_whitespace: Option<bool>,
+    #[serde(default)]
+    pub drag_and_drop: Option<bool>,
+    #[serde(default)]
+    pub copy_with_syntax_highlighting: Option<bool>,
+    #[serde(default)]
+    pub bracket_pair_colorization: Option<BracketPairColorizationConfigFile>,
     #[serde(default)]
     pub mouse_wheel_zoom: Option<bool>,
     #[serde(default)]
@@ -196,6 +222,15 @@ pub struct EditorSettings {
     pub smooth_scrolling: bool,
     pub cursor_style: String,
     pub cursor_blinking: String,
+    pub format_on_paste: bool,
+    pub format_on_type: bool,
+    pub auto_closing_brackets: String,
+    pub auto_closing_quotes: String,
+    pub auto_surround: String,
+    pub trim_auto_whitespace: bool,
+    pub drag_and_drop: bool,
+    pub copy_with_syntax_highlighting: bool,
+    pub bracket_pair_colorization: BracketPairColorizationSettings,
     pub mouse_wheel_zoom: bool,
     pub theme: String,
 }
@@ -210,6 +245,19 @@ pub struct GuidesSettings {
 impl Default for GuidesSettings {
     fn default() -> Self {
         Self { indentation: true }
+    }
+}
+
+/// Resolved `editor.bracketPairColorization.*` values.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BracketPairColorizationSettings {
+    pub enabled: bool,
+}
+
+impl Default for BracketPairColorizationSettings {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 
@@ -231,6 +279,15 @@ impl Default for EditorSettings {
             smooth_scrolling: false,
             cursor_style: "line".to_string(),
             cursor_blinking: "blink".to_string(),
+            format_on_paste: false,
+            format_on_type: false,
+            auto_closing_brackets: "languageDefined".to_string(),
+            auto_closing_quotes: "languageDefined".to_string(),
+            auto_surround: "languageDefined".to_string(),
+            trim_auto_whitespace: true,
+            drag_and_drop: true,
+            copy_with_syntax_highlighting: true,
+            bracket_pair_colorization: BracketPairColorizationSettings::default(),
             mouse_wheel_zoom: false,
             theme: "vs-dark".to_string(),
         }
@@ -477,6 +534,35 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
         &["blink", "smooth", "phase", "expand", "solid"],
         "blink",
     ));
+    e.format_on_paste = Some(e.format_on_paste.unwrap_or(false));
+    e.format_on_type = Some(e.format_on_type.unwrap_or(false));
+    e.auto_closing_brackets = Some(sanitize_enum(
+        e.auto_closing_brackets.as_deref().unwrap_or("languageDefined"),
+        &["always", "languageDefined", "beforeWhitespace", "never"],
+        "languageDefined",
+    ));
+    e.auto_closing_quotes = Some(sanitize_enum(
+        e.auto_closing_quotes.as_deref().unwrap_or("languageDefined"),
+        &["always", "languageDefined", "beforeWhitespace", "never"],
+        "languageDefined",
+    ));
+    e.auto_surround = Some(sanitize_enum(
+        e.auto_surround.as_deref().unwrap_or("languageDefined"),
+        &["languageDefined", "quotes", "brackets", "never"],
+        "languageDefined",
+    ));
+    e.trim_auto_whitespace = Some(e.trim_auto_whitespace.unwrap_or(true));
+    e.drag_and_drop = Some(e.drag_and_drop.unwrap_or(true));
+    e.copy_with_syntax_highlighting =
+        Some(e.copy_with_syntax_highlighting.unwrap_or(true));
+    e.bracket_pair_colorization = Some(BracketPairColorizationConfigFile {
+        enabled: Some(
+            e.bracket_pair_colorization
+                .as_ref()
+                .and_then(|b| b.enabled)
+                .unwrap_or(true),
+        ),
+    });
     e.mouse_wheel_zoom = Some(e.mouse_wheel_zoom.unwrap_or(false));
     e.theme = Some(sanitize_theme(e.theme.as_deref().unwrap_or("vs-dark")));
 
@@ -582,6 +668,34 @@ fn parse_user_config(text: &str) -> UserConfig {
                         .editor
                         .cursor_blinking
                         .unwrap_or_else(|| "blink".to_string()),
+                    format_on_paste: file.editor.format_on_paste.unwrap_or(false),
+                    format_on_type: file.editor.format_on_type.unwrap_or(false),
+                    auto_closing_brackets: file
+                        .editor
+                        .auto_closing_brackets
+                        .unwrap_or_else(|| "languageDefined".to_string()),
+                    auto_closing_quotes: file
+                        .editor
+                        .auto_closing_quotes
+                        .unwrap_or_else(|| "languageDefined".to_string()),
+                    auto_surround: file
+                        .editor
+                        .auto_surround
+                        .unwrap_or_else(|| "languageDefined".to_string()),
+                    trim_auto_whitespace: file.editor.trim_auto_whitespace.unwrap_or(true),
+                    drag_and_drop: file.editor.drag_and_drop.unwrap_or(true),
+                    copy_with_syntax_highlighting: file
+                        .editor
+                        .copy_with_syntax_highlighting
+                        .unwrap_or(true),
+                    bracket_pair_colorization: BracketPairColorizationSettings {
+                        enabled: file
+                            .editor
+                            .bracket_pair_colorization
+                            .as_ref()
+                            .and_then(|b| b.enabled)
+                            .unwrap_or(true),
+                    },
                     mouse_wheel_zoom: file.editor.mouse_wheel_zoom.unwrap_or(false),
                     theme: file.editor.theme.unwrap_or_else(|| "vs-dark".to_string()),
                 },
@@ -701,9 +815,10 @@ pub fn configured_shell(app: &AppHandle) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        defaults, parse_user_config, sanitize_file, AutoSaveSettings, EditorSettings,
-        FilesSettings, GeneralSettings, GuidesSettings, LspSettings, TerminalSettings, UserConfig,
-        UserConfigFile, DEFAULT_FONT_FAMILY,
+        defaults, parse_user_config, sanitize_file, AutoSaveSettings,
+        BracketPairColorizationSettings, EditorSettings, FilesSettings, GeneralSettings,
+        GuidesSettings, LspSettings, TerminalSettings, UserConfig, UserConfigFile,
+        DEFAULT_FONT_FAMILY,
     };
 
     #[test]
@@ -811,6 +926,15 @@ mod tests {
         assert!(!cfg.editor.smooth_scrolling);
         assert_eq!(cfg.editor.cursor_style, "line");
         assert_eq!(cfg.editor.cursor_blinking, "blink");
+        assert!(!cfg.editor.format_on_paste);
+        assert!(!cfg.editor.format_on_type);
+        assert_eq!(cfg.editor.auto_closing_brackets, "languageDefined");
+        assert_eq!(cfg.editor.auto_closing_quotes, "languageDefined");
+        assert_eq!(cfg.editor.auto_surround, "languageDefined");
+        assert!(cfg.editor.trim_auto_whitespace);
+        assert!(cfg.editor.drag_and_drop);
+        assert!(cfg.editor.copy_with_syntax_highlighting);
+        assert!(cfg.editor.bracket_pair_colorization.enabled);
         assert_eq!(cfg.terminal.default_shell, "auto");
         assert!(cfg.general.restore_last_workspace);
         assert!(cfg.general.confirm_before_close);
@@ -881,6 +1005,30 @@ mod tests {
         assert_eq!(file.editor.smooth_scrolling, Some(false));
         assert_eq!(file.editor.cursor_style.as_deref(), Some("line"));
         assert_eq!(file.editor.cursor_blinking.as_deref(), Some("blink"));
+        assert_eq!(file.editor.format_on_paste, Some(false));
+        assert_eq!(file.editor.format_on_type, Some(false));
+        assert_eq!(
+            file.editor.auto_closing_brackets.as_deref(),
+            Some("languageDefined")
+        );
+        assert_eq!(
+            file.editor.auto_closing_quotes.as_deref(),
+            Some("languageDefined")
+        );
+        assert_eq!(
+            file.editor.auto_surround.as_deref(),
+            Some("languageDefined")
+        );
+        assert_eq!(file.editor.trim_auto_whitespace, Some(true));
+        assert_eq!(file.editor.drag_and_drop, Some(true));
+        assert_eq!(file.editor.copy_with_syntax_highlighting, Some(true));
+        assert_eq!(
+            file.editor
+                .bracket_pair_colorization
+                .as_ref()
+                .and_then(|b| b.enabled),
+            Some(true)
+        );
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
@@ -979,6 +1127,15 @@ mod tests {
                 smooth_scrolling: true,
                 cursor_style: "block".to_string(),
                 cursor_blinking: "smooth".to_string(),
+                format_on_paste: true,
+                format_on_type: true,
+                auto_closing_brackets: "never".to_string(),
+                auto_closing_quotes: "beforeWhitespace".to_string(),
+                auto_surround: "quotes".to_string(),
+                trim_auto_whitespace: false,
+                drag_and_drop: false,
+                copy_with_syntax_highlighting: false,
+                bracket_pair_colorization: BracketPairColorizationSettings { enabled: false },
                 mouse_wheel_zoom: true,
                 theme: "hc-black".to_string(),
             },
@@ -1022,6 +1179,24 @@ mod tests {
         assert!(text.contains(r#""smoothScrolling":true"#), "{text}");
         assert!(text.contains(r#""cursorStyle":"block""#), "{text}");
         assert!(text.contains(r#""cursorBlinking":"smooth""#), "{text}");
+        assert!(text.contains(r#""formatOnPaste":true"#), "{text}");
+        assert!(text.contains(r#""formatOnType":true"#), "{text}");
+        assert!(text.contains(r#""autoClosingBrackets":"never""#), "{text}");
+        assert!(
+            text.contains(r#""autoClosingQuotes":"beforeWhitespace""#),
+            "{text}"
+        );
+        assert!(text.contains(r#""autoSurround":"quotes""#), "{text}");
+        assert!(text.contains(r#""trimAutoWhitespace":false"#), "{text}");
+        assert!(text.contains(r#""dragAndDrop":false"#), "{text}");
+        assert!(
+            text.contains(r#""copyWithSyntaxHighlighting":false"#),
+            "{text}"
+        );
+        assert!(
+            text.contains(r#""bracketPairColorization":{"enabled":false}"#),
+            "{text}"
+        );
         assert!(text.contains(r#""wordWrap":"on""#), "{text}");
         assert!(text.contains(r#""minimap":true"#), "{text}");
         assert!(text.contains(r#""mouseWheelZoom":true"#), "{text}");
@@ -1043,6 +1218,12 @@ mod tests {
         assert!(!text.contains("smooth_scrolling"), "{text}");
         assert!(!text.contains("cursor_style"), "{text}");
         assert!(!text.contains("cursor_blinking"), "{text}");
+        assert!(!text.contains("format_on_paste"), "{text}");
+        assert!(!text.contains("auto_closing_brackets"), "{text}");
+        assert!(!text.contains("auto_surround"), "{text}");
+        assert!(!text.contains("trim_auto_whitespace"), "{text}");
+        assert!(!text.contains("drag_and_drop"), "{text}");
+        assert!(!text.contains("bracket_pair_colorization"), "{text}");
     }
 
     #[test]
@@ -1084,5 +1265,40 @@ mod tests {
         assert_eq!(spaces.editor.font_family, DEFAULT_FONT_FAMILY);
         let kept = parse_user_config(r#"{"editor":{"fontFamily":"  JetBrains Mono  "}}"#);
         assert_eq!(kept.editor.font_family, "JetBrains Mono");
+    }
+
+    #[test]
+    fn parses_editor_editing_section() {
+        let cfg = parse_user_config(
+            r#"{"editor":{"formatOnPaste":true,"formatOnType":true,"autoClosingBrackets":"beforeWhitespace","autoClosingQuotes":"never","autoSurround":"brackets","trimAutoWhitespace":false,"dragAndDrop":false,"copyWithSyntaxHighlighting":false,"bracketPairColorization":{"enabled":false}}}"#,
+        );
+        assert!(cfg.editor.format_on_paste);
+        assert!(cfg.editor.format_on_type);
+        assert_eq!(cfg.editor.auto_closing_brackets, "beforeWhitespace");
+        assert_eq!(cfg.editor.auto_closing_quotes, "never");
+        assert_eq!(cfg.editor.auto_surround, "brackets");
+        assert!(!cfg.editor.trim_auto_whitespace);
+        assert!(!cfg.editor.drag_and_drop);
+        assert!(!cfg.editor.copy_with_syntax_highlighting);
+        assert!(!cfg.editor.bracket_pair_colorization.enabled);
+    }
+
+    #[test]
+    fn sanitizes_unknown_editor_editing_values() {
+        let cfg = parse_user_config(
+            r#"{"editor":{"autoClosingBrackets":"bogus","autoClosingQuotes":"bogus","autoSurround":"bogus","bracketPairColorization":{}}}"#,
+        );
+        assert_eq!(cfg.editor.auto_closing_brackets, "languageDefined");
+        assert_eq!(cfg.editor.auto_closing_quotes, "languageDefined");
+        assert_eq!(cfg.editor.auto_surround, "languageDefined");
+        // An empty bracketPairColorization object still enables colorization.
+        assert!(cfg.editor.bracket_pair_colorization.enabled);
+
+        // `always` is a valid autoClosing* strategy but NOT an autoSurround one.
+        let cross = parse_user_config(
+            r#"{"editor":{"autoClosingBrackets":"always","autoSurround":"always"}}"#,
+        );
+        assert_eq!(cross.editor.auto_closing_brackets, "always");
+        assert_eq!(cross.editor.auto_surround, "languageDefined");
     }
 }

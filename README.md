@@ -55,7 +55,7 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 阶段 13.5：自定义标题栏 —— 关闭系统原生装饰（`decorations:false`），自绘 最小化 / 最大化（还原）/ 关闭 与可拖拽区域；双击标题栏最大化 / 还原；窗口控制按钮与拖拽区互不吞并。
 - 阶段 13.7：品牌化 —— 以项目 Logo 生成全套 Tauri 应用图标（ico / icns / png / Windows Square），并在自定义标题栏显示 Logo。
 - 阶段 13.8：密度精修 —— 顶部栏高度 36px、资源管理器默认宽度 220px（min 180 / max 400）。
-- 阶段 14：编辑器外观配置 —— Settings → 编辑器新增**字体**（字体族 / 连字）、**显示**（行号 / 空白字符 / 当前行高亮 / 缩进参考线 / 代码折叠 / 括号匹配 / 平滑滚动）、**光标**（样式 / 闪烁）三组共 11 项 Monaco 原生配置，写入 `user.json` 的 `editor` 节（含嵌套 `guides.indentation`）；Rust 侧白名单校验非法枚举、空字体族回退默认，旧 `user.json` 缺字段自动补默认；热应用改为**按字段**下发（仅 `editor.theme` 变化才 `setTheme`）。
+- 阶段 14：编辑器设置 —— Settings → 编辑器新增 **字体**（字体族 / 连字）、**显示**（行号 / 空白字符 / 当前行高亮 / 缩进参考线 / 代码折叠 / 括号匹配 / 括号对着色 / 平滑滚动 / 光标样式 / 光标闪烁）、**编辑**（粘贴时格式化 / 输入时格式化 / 自动闭合括号 / 自动闭合引号 / 自动包裹 / 去除自动空白 / 拖放文本 / 复制时保留语法高亮）三组共 20 项 Monaco 原生配置，与既有的字号 / 制表符大小 / 自动换行 / 缩略图 / `Ctrl+滚轮` 缩放 / 配色主题一起构成完整的编辑器设置；全部写入 `user.json` 的 `editor` 节（含嵌套 `guides.indentation` 与 `bracketPairColorization.enabled`）；Rust 侧枚举白名单校验非法值、空字体族回退默认，旧 `user.json` 缺字段自动补默认；热应用**按字段**下发（仅 `editor.theme` 变化才 `setTheme`）。
 - 资源管理器「打开文件」入口 —— 系统文件选择器；工作区内文件按普通可写标签打开，工作区外文件按只读外部标签打开；复用 path identity（`isPathInsideWorkspace` / `sameFile`）去重，已打开则激活、不产生重复标签。
 - 工程化 —— GitHub Actions：CI（前端 `tsc + vite build` 与 Rust `cargo check`）与 Release（多平台 `tauri-action`，`v*` 标签触发）。
 

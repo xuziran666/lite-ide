@@ -40,13 +40,29 @@ const DEFAULT_EDITOR: EditorSettings = {
   smoothScrolling: false,
   cursorStyle: "line",
   cursorBlinking: "blink",
+  formatOnPaste: false,
+  formatOnType: false,
+  autoClosingBrackets: "languageDefined",
+  autoClosingQuotes: "languageDefined",
+  autoSurround: "languageDefined",
+  trimAutoWhitespace: true,
+  dragAndDrop: true,
+  copyWithSyntaxHighlighting: true,
+  bracketPairColorization: { enabled: true },
   mouseWheelZoom: false,
   theme: "vs-dark",
 };
 
-/** Deep-clone the editor config so persisted patches never share `guides`. */
+/**
+ * Deep-clone the editor config so persisted patches never share the nested
+ * `guides` / `bracketPairColorization` objects.
+ */
 function cloneEditor(editor: EditorSettings): EditorSettings {
-  return { ...editor, guides: { ...editor.guides } };
+  return {
+    ...editor,
+    guides: { ...editor.guides },
+    bracketPairColorization: { ...editor.bracketPairColorization },
+  };
 }
 
 const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };

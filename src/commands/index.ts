@@ -101,6 +101,11 @@ export interface EditorGuidesSettings {
   indentation: boolean;
 }
 
+/** `editor.bracketPairColorization.*`: nested like `guides`. */
+export interface EditorBracketPairColorizationSettings {
+  enabled: boolean;
+}
+
 /**
  * Monaco options mirrored from `user.json`. Every value is a union of what
  * Monaco itself accepts (monaco-editor 0.56 `IEditorOptions`), so the settings
@@ -128,6 +133,23 @@ export interface EditorSettings {
     | "block-outline"
     | "underline-thin";
   cursorBlinking: "blink" | "smooth" | "phase" | "expand" | "solid";
+  formatOnPaste: boolean;
+  formatOnType: boolean;
+  autoClosingBrackets:
+    | "always"
+    | "languageDefined"
+    | "beforeWhitespace"
+    | "never";
+  autoClosingQuotes:
+    | "always"
+    | "languageDefined"
+    | "beforeWhitespace"
+    | "never";
+  autoSurround: "languageDefined" | "quotes" | "brackets" | "never";
+  trimAutoWhitespace: boolean;
+  dragAndDrop: boolean;
+  copyWithSyntaxHighlighting: boolean;
+  bracketPairColorization: EditorBracketPairColorizationSettings;
   mouseWheelZoom: boolean;
   theme: string;
 }

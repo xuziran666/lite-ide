@@ -69,9 +69,10 @@
 
 ## 5. 编辑器
 
-- **Monaco 配置**：字体族（默认 `Consolas, 'Courier New', monospace`）、字体连字、字号（默认 14）、制表符大小（默认 2）、`wordWrap`（默认 off）、minimap（默认关）、行号（默认 on）、空白字符（默认 selection）、当前行高亮（默认 line）、缩进参考线（默认开）、代码折叠（默认开）、括号匹配（默认 near）、平滑滚动（默认关）、光标样式（默认 line）、光标闪烁（默认 blink）、配色主题（默认 `vs-dark`，可选 Light / High Contrast / High Contrast Light）均可在设置中调整，并在修改后**立即热应用到所有已打开编辑器**（`editor.updateOptions` / `monaco.editor.setTheme`）。
+- **Monaco 配置（24 项 + 配色主题）**：**字体** —— 字体族（默认 `Consolas, 'Courier New', monospace`）、字体连字（默认关）、字号（默认 14）；**排版** —— 制表符大小（默认 2）、`wordWrap`（默认 off）、缩略图（默认关）；**显示** —— 行号（默认 on）、空白字符（默认 selection）、当前行高亮（默认 line）、缩进参考线（默认开）、代码折叠（默认开）、括号匹配（默认 near）、括号对着色（默认开）、平滑滚动（默认关）、光标样式（默认 line）、光标闪烁（默认 blink）；**编辑** —— 粘贴时格式化（默认关）、输入时格式化（默认关）、自动闭合括号（默认 languageDefined）、自动闭合引号（默认 languageDefined）、自动包裹（默认 languageDefined）、去除自动空白（默认开）、拖放文本（默认开）、复制时保留语法高亮（默认开）；另有配色主题 `editor.theme`（默认 `vs-dark`，可选 Light / High Contrast / High Contrast Light）与应用层开关 `mouseWheelZoom`。全部可在设置中调整，并在修改后**立即热应用到所有已打开编辑器**（`editor.updateOptions` / `monaco.editor.setTheme`）。
 - **按字段应用**：热应用是**按字段**下发的 —— 只有 `editor.theme` 变化才调用 `monaco.editor.setTheme`，其余字段各自通过 `editor.updateOptions({ 该字段 })` 单独更新，改一项不会重设主题或其它选项；全程不重建 Editor、不重建 Model，光标 / 选区 / 滚动位置 / 撤销栈 / LSP 会话均不受影响。
-- **显示配置的合法取值**（与 monaco-editor `IEditorOptions` 完全一致，非法值由后端回退默认）：`lineNumbers` on / off / relative；`renderWhitespace` none / boundary / selection / all / trailing；`renderLineHighlight` none / gutter / line / all；`matchBrackets` always / never / near；`cursorStyle` line / block / underline / line-thin / block-outline / underline-thin；`cursorBlinking` blink / smooth / phase / expand / solid；`guides.indentation` 布尔。
+- **配置项合法取值**（与 monaco-editor 0.56 的 `IEditorOptions` / `IGlobalEditorOptions` 完全一致，非法值由后端回退默认）：`lineNumbers` on / off / relative；`renderWhitespace` none / boundary / selection / all / trailing；`renderLineHighlight` none / gutter / line / all；`matchBrackets` always / never / near；`cursorStyle` line / block / underline / line-thin / block-outline / underline-thin；`cursorBlinking` blink / smooth / phase / expand / solid；`autoClosingBrackets` / `autoClosingQuotes` always / languageDefined / beforeWhitespace / never；`autoSurround` languageDefined / quotes / brackets / never；`formatOnPaste`、`formatOnType`、`trimAutoWhitespace`、`dragAndDrop`、`copyWithSyntaxHighlighting`、`guides.indentation`、`bracketPairColorization.enabled` 为布尔。
+- **`formatOnPaste` / `formatOnType` 只是 Monaco 开关**：能否真正格式化取决于当前语言是否存在 formatter（Monaco 内建的 JSON / CSS / HTML worker、Monaco TS/JS worker 的 on-type 格式化、或语言服务提供的 `documentFormattingProvider`）；没有 formatter 的语言不会产生可见效果 —— 本项目不自行实现 formatter，也不为此新增任何 LSP 能力。
 - **缩放与自动保存**：`Ctrl/Cmd + 滚轮` 在编辑器内缩放字号（8–40，可在设置关闭）；自动保存支持「编辑停止后延迟保存」「编辑器失焦保存」「窗口失焦保存」三个独立触发条件（设置中开关与设延迟）。
 - **多标签**：点击切换、`×` 关闭、鼠标中键关闭、脏文件显示橙色圆点、标签保持固定宽度（超长省略）并支持滚轮横向滚动、激活标签自动滚入视野。
 - **保存**：`Ctrl/Cmd+S`；脏状态基于 Monaco `versionId` 与 `savedVersion` 比较（不是简单布尔标记），因此撤销回已保存内容时会自动取消脏标记。
@@ -211,20 +212,32 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | 分区 | 项目 | 生效时机 |
 |---|---|---|
 | 通用 | 恢复上次打开的文件夹；关闭时确认未保存的更改；**主题（暗色 / 亮色 / 跟随系统）** | 恢复项下次启动；主题与关窗确认即时生效 |
-| 编辑器 | 字号 6–64、制表符大小 1–16、自动换行 off/on、缩略图开关、**Monaco 配色主题**、**Ctrl+滚轮缩放** | 立即热应用 |
+| 编辑器 | **字体**（字体族 / 连字 / 字号 6–64）、**排版**（制表符大小 1–16、自动换行 off/on、缩略图）、**显示**（行号 / 空白字符 / 当前行高亮 / 缩进参考线 / 代码折叠 / 括号匹配 / 括号对着色 / 平滑滚动 / 光标样式 / 光标闪烁）、**编辑**（粘贴时格式化 / 输入时格式化 / 自动闭合括号 / 自动闭合引号 / 自动包裹 / 去除自动空白 / 拖放文本 / 复制时保留语法高亮）、**Monaco 配色主题**、**Ctrl+滚轮缩放** | 立即热应用（按字段） |
 | 文件 | **自动保存**：`Off` / After Delay / On Focus Change / On Window Change，延迟可设（100–60000ms） | 立即生效 |
 | 终端 | 默认 Shell（下拉，含 `auto` 与探测到的壳） | 新终端会话（spawn 时） |
 | 任务 | 打开 tasks.json 编辑全局任务 | 保存后重启应用 |
 | 键盘快捷键 | 见下 | 立即生效 |
 
 - **键盘快捷键**：14 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`、`renameSymbol`、`findReferences`、`codeActions`、`formatDocument`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。（`F2`/`Shift+F12`/`Shift+Alt+F` 等默认值由后端下发，绕过“须含 Ctrl”的录制校验。）
-- **持久化**：所有设置在改动时即时写回 `user.json`（后端做边界钳制/空值回退/非法 `wordWrap` 归 off）；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
+- **持久化**：所有设置在改动时即时写回 `user.json`（后端做边界钳制/空值回退/枚举白名单：非法 `wordWrap` 归 off，非法 `lineNumbers` / `renderWhitespace` / `renderLineHighlight` / `matchBrackets` / `cursorStyle` / `cursorBlinking` / `autoClosingBrackets` / `autoClosingQuotes` / `autoSurround` 各自回退默认值，空或纯空格的 `fontFamily` 回退默认字族）；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
 - **user.json 结构**（camelCase）：
 
 ```json
 {
   "keybindings": { "toggleExplorer": "Ctrl+B", "openTaskCenter": "Ctrl+Ctrl", "..." : "..." },
-  "editor": { "fontSize": 14, "tabSize": 2, "wordWrap": "off", "minimap": false, "mouseWheelZoom": false, "theme": "vs-dark" },
+  "editor": {
+    "fontFamily": "Consolas, 'Courier New', monospace", "fontSize": 14, "fontLigatures": false,
+    "tabSize": 2, "wordWrap": "off", "minimap": false,
+    "lineNumbers": "on", "renderWhitespace": "selection", "renderLineHighlight": "line",
+    "guides": { "indentation": true }, "folding": true, "matchBrackets": "near",
+    "smoothScrolling": false, "cursorStyle": "line", "cursorBlinking": "blink",
+    "formatOnPaste": false, "formatOnType": false,
+    "autoClosingBrackets": "languageDefined", "autoClosingQuotes": "languageDefined",
+    "autoSurround": "languageDefined", "trimAutoWhitespace": true,
+    "dragAndDrop": true, "copyWithSyntaxHighlighting": true,
+    "bracketPairColorization": { "enabled": true },
+    "mouseWheelZoom": false, "theme": "vs-dark"
+  },
   "terminal": { "defaultShell": "auto" },
   "general": { "restoreLastWorkspace": true, "confirmBeforeClose": true, "theme": "dark" },
   "files": {

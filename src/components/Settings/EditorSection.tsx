@@ -83,6 +83,20 @@ const CURSOR_BLINKING: Option<EditorSettings["cursorBlinking"]>[] = [
   { value: "solid", label: "Solid" },
 ];
 
+const AUTO_CLOSING_STRATEGY: Option<EditorSettings["autoClosingBrackets"]>[] = [
+  { value: "languageDefined", label: "由语言决定" },
+  { value: "always", label: "始终" },
+  { value: "beforeWhitespace", label: "空白前" },
+  { value: "never", label: "从不" },
+];
+
+const AUTO_SURROUND_STRATEGY: Option<EditorSettings["autoSurround"]>[] = [
+  { value: "languageDefined", label: "由语言决定" },
+  { value: "quotes", label: "引号" },
+  { value: "brackets", label: "括号" },
+  { value: "never", label: "从不" },
+];
+
 function SelectField<T extends string>({
   label,
   value,
@@ -273,6 +287,72 @@ function EditorSection() {
         value={editor.cursorBlinking}
         options={CURSOR_BLINKING}
         onChange={(cursorBlinking) => void updateEditor({ cursorBlinking })}
+      />
+
+      <div className="settings-group-title">编辑</div>
+      <CheckField
+        label="粘贴时格式化"
+        detail="用当前语言的格式化器格式化粘贴的内容（是否生效取决于是否有 formatter）。"
+        checked={editor.formatOnPaste}
+        onChange={(formatOnPaste) => void updateEditor({ formatOnPaste })}
+      />
+      <CheckField
+        label="输入时格式化"
+        detail="输入时自动格式化代码（是否生效取决于是否有 formatter）。"
+        checked={editor.formatOnType}
+        onChange={(formatOnType) => void updateEditor({ formatOnType })}
+      />
+      <SelectField
+        label="自动闭合括号"
+        value={editor.autoClosingBrackets}
+        options={AUTO_CLOSING_STRATEGY}
+        onChange={(autoClosingBrackets) =>
+          void updateEditor({ autoClosingBrackets })
+        }
+      />
+      <SelectField
+        label="自动闭合引号"
+        value={editor.autoClosingQuotes}
+        options={AUTO_CLOSING_STRATEGY}
+        onChange={(autoClosingQuotes) =>
+          void updateEditor({ autoClosingQuotes })
+        }
+      />
+      <SelectField
+        label="自动包裹"
+        value={editor.autoSurround}
+        options={AUTO_SURROUND_STRATEGY}
+        onChange={(autoSurround) => void updateEditor({ autoSurround })}
+      />
+      <CheckField
+        label="去除自动空白"
+        detail="行变空时移除自动缩进/自动闭合留下的空白。"
+        checked={editor.trimAutoWhitespace}
+        onChange={(trimAutoWhitespace) =>
+          void updateEditor({ trimAutoWhitespace })
+        }
+      />
+      <CheckField
+        label="拖放文本"
+        detail="允许用鼠标拖动选中文本来移动内容。"
+        checked={editor.dragAndDrop}
+        onChange={(dragAndDrop) => void updateEditor({ dragAndDrop })}
+      />
+      <CheckField
+        label="复制时保留语法高亮"
+        detail="复制到剪贴板时写入带语法高亮的 HTML。"
+        checked={editor.copyWithSyntaxHighlighting}
+        onChange={(copyWithSyntaxHighlighting) =>
+          void updateEditor({ copyWithSyntaxHighlighting })
+        }
+      />
+      <CheckField
+        label="括号对着色"
+        detail="按嵌套层级给配对的括号着色。"
+        checked={editor.bracketPairColorization.enabled}
+        onChange={(enabled) =>
+          void updateEditor({ bracketPairColorization: { enabled } })
+        }
       />
       <p className="settings-hint">以上修改会立即应用到当前已打开的编辑器。</p>
     </div>

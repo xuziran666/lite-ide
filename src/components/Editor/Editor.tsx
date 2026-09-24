@@ -33,6 +33,15 @@ const MONACO_OPTION_KEYS = [
   "smoothScrolling",
   "cursorStyle",
   "cursorBlinking",
+  "formatOnPaste",
+  "formatOnType",
+  "autoClosingBrackets",
+  "autoClosingQuotes",
+  "autoSurround",
+  "trimAutoWhitespace",
+  "dragAndDrop",
+  "copyWithSyntaxHighlighting",
+  "bracketPairColorization",
 ] as const;
 
 /** The full Monaco option set for one `editor` configuration. */
@@ -53,8 +62,31 @@ function monacoOptions(editor: EditorSettings): MonacoEditorOptions {
     smoothScrolling: editor.smoothScrolling,
     cursorStyle: editor.cursorStyle,
     cursorBlinking: editor.cursorBlinking,
+    formatOnPaste: editor.formatOnPaste,
+    formatOnType: editor.formatOnType,
+    autoClosingBrackets: editor.autoClosingBrackets,
+    autoClosingQuotes: editor.autoClosingQuotes,
+    autoSurround: editor.autoSurround,
+    trimAutoWhitespace: editor.trimAutoWhitespace,
+    dragAndDrop: editor.dragAndDrop,
+    copyWithSyntaxHighlighting: editor.copyWithSyntaxHighlighting,
+    bracketPairColorization: {
+      enabled: editor.bracketPairColorization.enabled,
+    },
   };
 }
+
+/**
+ * Options whose Monaco value lives in a nested object: they are compared
+ * through that sub-field so a patch only ever carries what really changed.
+ */
+const NESTED_OPTION_VALUES: Partial<
+  Record<(typeof MONACO_OPTION_KEYS)[number], (o: MonacoEditorOptions) => unknown>
+> = {
+  minimap: (o) => o.minimap?.enabled,
+  guides: (o) => o.guides?.indentation,
+  bracketPairColorization: (o) => o.bracketPairColorization?.enabled,
+};
 
 /**
  * Only the options whose Monaco value actually changed, so a settings edit
@@ -69,12 +101,10 @@ function changedMonacoOptions(
   const after = monacoOptions(next);
   const patch: Record<string, unknown> = {};
   for (const key of MONACO_OPTION_KEYS) {
-    const same =
-      key === "minimap"
-        ? before.minimap?.enabled === after.minimap?.enabled
-        : key === "guides"
-          ? before.guides?.indentation === after.guides?.indentation
-          : Object.is(before[key], after[key]);
+    const read = NESTED_OPTION_VALUES[key];
+    const same = read
+      ? read(before) === read(after)
+      : Object.is(before[key], after[key]);
     if (!same) {
       patch[key] = after[key];
     }
