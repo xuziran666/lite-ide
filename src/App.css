@@ -72,16 +72,19 @@
   --vo-color-094771: #e5f1fb;
   --vo-color-0e639c: #00518e;
   --vo-color-1177bb: #00518e;
-  --vo-color-1e1e1e: #ffffff;
-  --vo-color-252526: #f3f3f3;
-  --vo-color-2a2a2a: #ececee;
-  --vo-color-2d2d2d: #e8e8e8;
-  --vo-color-2d2d38: #f7f7f7;
-  --vo-color-333333: #ffffff;
-  --vo-color-37373d: #f3f3f3;
-  --vo-color-3c3c3c: #e0e0e0;
+  --vo-color-1e1e1e: #f7f7f7;
+  --vo-color-252526: #ededed;
+  --vo-color-2a2a2a: #e4e4e4;
+  --vo-color-2a2d2e: #e2e2e2;
+  --vo-color-2d2d2d: #dcdcdc;
+  --vo-color-2d2d38: #e3e3e3;
+  --vo-color-333333: #e5e5e5;
+  --vo-color-37373d: #dcdcdc;
+  --vo-color-3a3d41: #e0e0e0;
+  --vo-color-3c3c3c: #d8d8d8;
   --vo-color-3fb950: #1a7f37;
-  --vo-color-454545: #d8d8d8;
+  --vo-color-454545: #c8c8c8;
+  --vo-color-4a4a4a: #c4c4c4;
   --vo-color-6a9955: #1a7f37;
   --vo-color-858585: #616161;
   --vo-color-9d9d9d: #616161;
@@ -150,7 +153,7 @@ body,
   align-items: center;
   gap: 10px;
   height: 42px;
-  padding: 0 12px;
+  padding: 0 0 0 12px;
   background-color: var(--vo-color-252526);
   border-bottom: 1px solid var(--vo-color-3c3c3c);
   color: var(--vo-color-cccccc);
@@ -239,6 +242,37 @@ body,
   color: var(--vo-color-ffffff);
 }
 
+/* Custom title bar window controls (minimize / maximize / close). */
+.top-bar-window-controls {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.top-bar-window-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--vo-color-cccccc);
+  cursor: pointer;
+}
+
+.top-bar-window-button:hover {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+.top-bar-window-button.close:hover {
+  background-color: var(--vo-color-c53030);
+  color: var(--vo-color-ffffff);
+}
+
 .app-body {
   flex: 1;
   min-height: 0;
@@ -255,6 +289,7 @@ body,
   gap: 4px;
   padding: 6px 0;
   background-color: var(--vo-color-333333);
+  border-right: 1px solid var(--vo-color-252526);
   user-select: none;
 }
 
@@ -1411,7 +1446,7 @@ body.layout-resizing-horizontal {
 .settings-nav-item.active {
   color: var(--vo-color-ffffff);
   border-left-color: var(--vo-color-007acc);
-  background-color: var(--vo-color-2c2c2c);
+  background-color: var(--vo-color-2d2d2d);
 }
 
 .settings-content {
