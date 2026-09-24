@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::AppHandle;
 
+use crate::lsp::session::LspSession;
 use crate::terminal::TerminalSession;
 use crate::watcher::WorkspaceWatcher;
 
@@ -11,6 +12,7 @@ pub struct AppState {
     workspace: Mutex<Option<PathBuf>>,
     watcher: Mutex<Option<WorkspaceWatcher>>,
     terminals: Mutex<HashMap<u64, TerminalSession>>,
+    lsp: Mutex<Option<Arc<LspSession>>>,
 }
 
 impl AppState {
@@ -19,11 +21,14 @@ impl AppState {
             workspace: Mutex::new(None),
             watcher: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
+            lsp: Mutex::new(None),
         }
     }
 
     pub fn set_workspace(&self, path: PathBuf, app: AppHandle) -> Result<(), String> {
         self.kill_all_terminals();
+        // A new workspace never inherits the previous one's language server.
+        self.stop_lsp();
         let mut guard = self
             .workspace
             .lock()
@@ -90,6 +95,31 @@ impl AppState {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         for (_, mut session) in guard.drain() {
             session.kill();
+        }
+    }
+
+    /// The current LSP session, if any.
+    pub fn lsp_session(&self) -> Result<Option<Arc<LspSession>>, String> {
+        self.lsp
+            .lock()
+            .map(|guard| guard.clone())
+            .map_err(|_| "lsp state is poisoned".to_string())
+    }
+
+    /// Store (or clear) the shared LSP session.
+    pub fn set_lsp(&self, session: Option<Arc<LspSession>>) {
+        *self.lsp.lock().unwrap() = session;
+    }
+
+    /// Gracefully shut down the current session (if any) and clear the slot.
+    pub fn stop_lsp(&self) {
+        let session = self
+            .lsp
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(session) = session {
+            session.shutdown();
         }
     }
 }

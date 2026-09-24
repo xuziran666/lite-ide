@@ -183,3 +183,35 @@ export function searchWorkspace(
     useRegex: options.useRegex,
   });
 }
+
+export interface LspStartResult {
+  alreadyRunning: boolean;
+  rootUri: string | null;
+}
+
+/**
+ * Start (or re-attach to) the rust-analyzer session for the workspace. `path`
+ * is the file that triggered the start; its nearest `Cargo.toml` becomes the
+ * LSP root. Rejects when no workspace is open or the server binary is missing.
+ */
+export function lspStart(path?: string): Promise<LspStartResult> {
+  return invoke<LspStartResult>("lsp_start", { path });
+}
+
+/** Stop the rust-analyzer session (workspace switch / last Rust file closed). */
+export function lspStop(): Promise<void> {
+  return invoke<void>("lsp_stop");
+}
+
+/** Send a one-way LSP notification. No-ops silently when no server is running. */
+export function lspNotify(method: string, params: unknown): Promise<void> {
+  return invoke<void>("lsp_notify", { method, params });
+}
+
+/** Send an LSP request and resolve with the server's result. */
+export function lspRequest(
+  method: string,
+  params: unknown,
+): Promise<unknown> {
+  return invoke<unknown>("lsp_request", { method, params });
+}

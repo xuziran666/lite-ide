@@ -4,6 +4,7 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import { registerCppOutline } from "./cppOutline";
+import { registerRustLsp } from "../lsp/rust";
 
 interface MonacoEnv {
   getWorker(moduleId: string, label: string): Worker;
@@ -30,5 +31,9 @@ interface MonacoEnv {
 // Monaco ships only tokenization for C/C++; register a lightweight symbol
 // provider so the Outline panel works for cpp/c sources too.
 registerCppOutline();
+
+// Built-in LSP client for Rust: rust-analyzer is started lazily and feeds
+// diagnostics, completion, hover, definition and symbols to Monaco.
+registerRustLsp();
 
 export {};

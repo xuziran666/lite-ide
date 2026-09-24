@@ -1,6 +1,7 @@
 pub mod commands;
 mod config;
 mod error;
+mod lsp;
 mod session;
 mod shell;
 mod state;
@@ -41,6 +42,10 @@ pub fn run() {
             commands::config::set_user_config,
             commands::config::read_global_file,
             commands::config::write_global_file,
+            commands::lsp::lsp_start,
+            commands::lsp::lsp_stop,
+            commands::lsp::lsp_notify,
+            commands::lsp::lsp_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -49,6 +54,7 @@ pub fn run() {
         if let tauri::RunEvent::Exit = event {
             let state = app_handle.state::<AppState>();
             state.kill_all_terminals();
+            state.stop_lsp();
         }
     });
 }
