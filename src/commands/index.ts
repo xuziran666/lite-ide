@@ -102,6 +102,7 @@ export interface EditorSettings {
   wordWrap: string;
   minimap: boolean;
   mouseWheelZoom: boolean;
+  theme: string;
 }
 
 export interface TerminalSettings {

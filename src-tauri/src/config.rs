@@ -85,6 +85,8 @@ pub struct EditorConfigFile {
     pub minimap: Option<bool>,
     #[serde(default)]
     pub mouse_wheel_zoom: Option<bool>,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 /// `files.autoSave`: each trigger is independent, so any enabled trigger saves
@@ -151,6 +153,7 @@ pub struct EditorSettings {
     pub word_wrap: String,
     pub minimap: bool,
     pub mouse_wheel_zoom: bool,
+    pub theme: String,
 }
 
 impl Default for EditorSettings {
@@ -161,6 +164,7 @@ impl Default for EditorSettings {
             word_wrap: "off".to_string(),
             minimap: false,
             mouse_wheel_zoom: false,
+            theme: "vs-dark".to_string(),
         }
     }
 }
@@ -276,6 +280,14 @@ fn sanitize_word_wrap(value: &str) -> String {
     }
 }
 
+/// Whitelist the Monaco theme; anything unknown falls back to the default.
+fn sanitize_theme(value: &str) -> String {
+    match value {
+        "vs" | "vs-dark" | "hc-black" | "hc-light" => value.to_string(),
+        _ => "vs-dark".to_string(),
+    }
+}
+
 fn server_file(settings: &LspServerSettings) -> LspServerFile {
     LspServerFile {
         command: Some(settings.command.clone()),
@@ -327,6 +339,7 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
     e.word_wrap = Some(sanitize_word_wrap(e.word_wrap.as_deref().unwrap_or("off")));
     e.minimap = Some(e.minimap.unwrap_or(false));
     e.mouse_wheel_zoom = Some(e.mouse_wheel_zoom.unwrap_or(false));
+    e.theme = Some(sanitize_theme(e.theme.as_deref().unwrap_or("vs-dark")));
 
     let a = &mut file.files.auto_save;
     a.after_delay = Some(a.after_delay.unwrap_or(false));
@@ -382,6 +395,7 @@ fn parse_user_config(text: &str) -> UserConfig {
                     word_wrap: file.editor.word_wrap.unwrap_or_else(|| "off".to_string()),
                     minimap: file.editor.minimap.unwrap_or(false),
                     mouse_wheel_zoom: file.editor.mouse_wheel_zoom.unwrap_or(false),
+                    theme: file.editor.theme.unwrap_or_else(|| "vs-dark".to_string()),
                 },
                 terminal: TerminalSettings {
                     default_shell: file
@@ -573,6 +587,7 @@ mod tests {
         assert_eq!(cfg.editor.word_wrap, "off");
         assert!(!cfg.editor.minimap);
         assert!(!cfg.editor.mouse_wheel_zoom);
+        assert_eq!(cfg.editor.theme, "vs-dark");
         assert_eq!(cfg.terminal.default_shell, "auto");
         assert!(cfg.general.restore_last_workspace);
         assert!(cfg.general.confirm_before_close);
@@ -606,11 +621,12 @@ mod tests {
     #[test]
     fn clamps_out_of_range_editor_values() {
         let cfg = parse_user_config(
-            r#"{"editor":{"fontSize":500,"tabSize":0,"wordWrap":"bogus","minimap":false}}"#,
+            r#"{"editor":{"fontSize":500,"tabSize":0,"wordWrap":"bogus","minimap":false,"theme":"bogus"}}"#,
         );
         assert_eq!(cfg.editor.font_size, 64);
         assert_eq!(cfg.editor.tab_size, 1);
         assert_eq!(cfg.editor.word_wrap, "off");
+        assert_eq!(cfg.editor.theme, "vs-dark");
     }
 
     #[test]
@@ -627,6 +643,7 @@ mod tests {
         assert_eq!(file.editor.word_wrap.as_deref(), Some("off"));
         assert_eq!(file.editor.minimap, Some(false));
         assert_eq!(file.editor.mouse_wheel_zoom, Some(false));
+        assert_eq!(file.editor.theme.as_deref(), Some("vs-dark"));
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
@@ -715,6 +732,7 @@ mod tests {
                 word_wrap: "on".to_string(),
                 minimap: true,
                 mouse_wheel_zoom: true,
+                theme: "hc-black".to_string(),
             },
             terminal: TerminalSettings {
                 default_shell: "cmd.exe".to_string(),
@@ -744,6 +762,7 @@ mod tests {
         assert!(text.contains(r#""wordWrap":"on""#), "{text}");
         assert!(text.contains(r#""minimap":true"#), "{text}");
         assert!(text.contains(r#""mouseWheelZoom":true"#), "{text}");
+        assert!(text.contains(r#""theme":"hc-black""#), "{text}");
         assert!(text.contains(r#""defaultShell":"cmd.exe""#), "{text}");
         assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
         assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");

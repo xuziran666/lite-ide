@@ -65,6 +65,19 @@ function EditorSection() {
           <option value="on">开启</option>
         </select>
       </label>
+      <label className="settings-field settings-row">
+        <span className="settings-label">Color Theme</span>
+        <select
+          className="settings-select"
+          value={editor.theme}
+          onChange={(e) => void updateEditor({ theme: e.target.value })}
+        >
+          <option value="vs">Light</option>
+          <option value="vs-dark">Dark</option>
+          <option value="hc-black">High Contrast</option>
+          <option value="hc-light">High Contrast Light</option>
+        </select>
+      </label>
       <label className="settings-field settings-check">
         <span className="settings-check-text">
           <span className="settings-label">显示缩略图</span>

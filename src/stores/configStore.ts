@@ -30,6 +30,7 @@ const DEFAULT_EDITOR: EditorSettings = {
   wordWrap: "off",
   minimap: false,
   mouseWheelZoom: false,
+  theme: "vs-dark",
 };
 
 const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };

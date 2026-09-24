@@ -27,7 +27,7 @@ function Editor() {
 
     const editor = monaco.editor.create(host, {
       model: null,
-      theme: "vs-dark",
+      theme: useConfigStore.getState().editor.theme,
       automaticLayout: true,
       fontSize: 14,
       tabSize: 2,
@@ -98,6 +98,9 @@ function Editor() {
     const apply = () => {
       const s = useConfigStore.getState();
       if (!s.loaded) return;
+      // Theme is global in Monaco; set it once and every editor (current and
+      // future) picks it up without recreating models/editors.
+      monaco.editor.setTheme(s.editor.theme);
       editor.updateOptions({
         fontSize: s.editor.fontSize,
         tabSize: s.editor.tabSize,
