@@ -1,12 +1,16 @@
 # lite-ide
 
-基于 Tauri v2 的轻量级跨平台代码编辑器，核心功能为：文件树、代码编辑器（Monaco）、内置终端（xterm.js + portable-pty）、全局任务与设置系统。
+基于 Tauri v2 的轻量级跨平台代码编辑器，核心功能为：文件树、代码编辑器（Monaco）、内置终端（xterm.js + portable-pty）、任务与设置系统，以及项目导航（Quick Open / 全局搜索 / 大纲 / 问题）与内置 LSP 客户端（Rust / C / C++ / TypeScript / JavaScript）。
 
 ## 环境要求
 
 - Node.js 20+ / pnpm
 - Rust stable（含 MSVC 工具链，Windows）
 - Tauri v2 CLI（随 pnpm 安装）
+- 可选语言服务器（从 PATH 查找，缺少时对应语言保持 disconnected 并提示）：
+  - Rust：`rust-analyzer`
+  - C/C++：`clangd`
+  - TypeScript/JavaScript：`typescript-language-server --stdio`
 
 ## 开发
 
@@ -40,5 +44,9 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 阶段 7：任务系统 —— 全局 `tasks.json`（与应用配置 `user.json` 同目录）、任务中心下拉（`Ctrl+Ctrl` 快速两次 Ctrl 打开，`↑`/`↓` 选择、`Enter` 运行）、8 种变量占位符（`${workspaceFolder}`、`${file}`、`${fileDirname}`、`${relativeFile}` 等）与 Windows 扩展长度路径（`\\?\`）归一化（修复 MinGW `g++` 拒绝路径）、专用「任务」终端（运行前 `^C` 中断 → 350ms 后写入解析命令；shell 退出自动重启）。
 - 阶段 8：设置系统 —— 活动栏 ⚙ 打开覆盖式设置页（通用 / 编辑器 / 终端 / 任务 / 键盘快捷键 5 分区）、`user.json` 读写（camelCase，后端钳制/空值回退）、编辑器参数（字号/制表符/换行/缩略图）与快捷键热应用、默认 shell 仅对新建终端生效、可关闭「恢复上次文件夹」「关窗确认」、键位录制（含 `Ctrl+Ctrl` 双击与冲突检测）。
 - 阶段 9：体验修复 —— 终端 `Ctrl+C` 按 JetBrains 语义（有选区复制 / 无选区 `^C` 中断）、`user.json` camelCase 序列化修复。
+- 阶段 10：项目导航 —— Quick Open（`Ctrl/Cmd+P`，子序列模糊匹配，最多 50 条）、右侧栏（搜索 / 大纲 / 问题 三标签）、全局内容搜索（`Ctrl/Cmd+Shift+F`，大小写与正则开关，防抖 300ms）、Problems（聚合 Monaco markers）、Outline（`documentSymbol` 提供者，C/C++ 无语言服务时用正则扫描回退）；Rust 端 `list_workspace_files`/`search_workspace`。
+- 阶段 11：内置 LSP 客户端（Rust） —— 自建 stdio / JSON-RPC 传输（Content-Length 帧、请求-响应关联、未知消息不崩溃）、rust-analyzer 懒启动（首个 `.rs` 打开时）、诊断 / 补全 / 悬停 / 定义 / `documentSymbol`、Ctrl/Cmd+左键定义跳转（Ctrl+hover 仅显示可点击态不跳转）、workspace 外文件以只读单文件标签打开、按工作区/退出/最后文件关闭的生命周期与崩溃后不自动重启。
+- 阶段 11.2：多语言 LSP —— 同一通用客户端支持 clangd（C/C++）与 `typescript-language-server --stdio`（TS/JS）；单套 Monaco provider 按 model 语言分发，语言层仅描述 id / Monaco 语言 / 扩展名 / 命令 / 参数；`lsp` 用户配置节；关闭 Monaco TS/JS worker 中被 LSP 取代的重复能力。
+- 阶段 11.3：C/C++ 工具链发现 —— `compile_commands.json` 优先（clangd 原生发现 workspace 根与 `build/`，不覆盖其中的编译器/头文件/参数）；无数据库时用 PATH 中的 `g++`/`gcc` 作为 fallback（生成受管 `.clangd` + `--enable-config --query-driver`），不硬编码工具链/STL 路径，出现数据库时自动移除回退。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
