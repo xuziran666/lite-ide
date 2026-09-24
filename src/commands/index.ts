@@ -112,11 +112,25 @@ export interface GeneralSettings {
   confirmBeforeClose: boolean;
 }
 
+/** A resolved language-server invocation (executable + argv). */
+export interface LspServerConfig {
+  command: string;
+  args: string[];
+}
+
+/** Per-language language-server configuration. */
+export interface LspConfig {
+  rust: LspServerConfig;
+  cpp: LspServerConfig;
+  typescript: LspServerConfig;
+}
+
 export interface UserConfig {
   keybindings: Record<string, string>;
   editor: EditorSettings;
   terminal: TerminalSettings;
   general: GeneralSettings;
+  lsp: LspConfig;
   configDir: string;
   notice: string | null;
 }
@@ -127,6 +141,7 @@ export interface UserConfigPatch {
   editor: EditorSettings;
   terminal: TerminalSettings;
   general: GeneralSettings;
+  lsp: LspConfig;
 }
 
 /** The user configuration merged over the built-in defaults; always resolves. */
@@ -200,28 +215,40 @@ export interface LspStartResult {
 }
 
 /**
- * Start (or re-attach to) the rust-analyzer session for the workspace. `path`
- * is the file that triggered the start; its nearest `Cargo.toml` becomes the
- * LSP root. Rejects when no workspace is open or the server binary is missing.
+ * Start (or re-attach to) the language server session for one language in the
+ * workspace. `language` is the client language id ("rust" / "cpp" /
+ * "typescript"); `path` is the file that triggered the start (Rust uses it to
+ * find its nearest `Cargo.toml`); `command` is the configured server argv,
+ * falling back to the language's PATH default when omitted. Rejects when no
+ * workspace is open or the server binary is missing.
  */
-export function lspStart(path?: string): Promise<LspStartResult> {
-  return invoke<LspStartResult>("lsp_start", { path });
+export function lspStart(
+  language: string,
+  path?: string,
+  command?: string[],
+): Promise<LspStartResult> {
+  return invoke<LspStartResult>("lsp_start", { language, path, command });
 }
 
-/** Stop the rust-analyzer session (workspace switch / last Rust file closed). */
-export function lspStop(): Promise<void> {
-  return invoke<void>("lsp_stop");
+/** Stop one language's session (workspace switch / last file of that language). */
+export function lspStop(language: string): Promise<void> {
+  return invoke<void>("lsp_stop", { language });
 }
 
 /** Send a one-way LSP notification. No-ops silently when no server is running. */
-export function lspNotify(method: string, params: unknown): Promise<void> {
-  return invoke<void>("lsp_notify", { method, params });
+export function lspNotify(
+  language: string,
+  method: string,
+  params: unknown,
+): Promise<void> {
+  return invoke<void>("lsp_notify", { language, method, params });
 }
 
 /** Send an LSP request and resolve with the server's result. */
 export function lspRequest(
+  language: string,
   method: string,
   params: unknown,
 ): Promise<unknown> {
-  return invoke<unknown>("lsp_request", { method, params });
+  return invoke<unknown>("lsp_request", { language, method, params });
 }

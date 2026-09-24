@@ -37,6 +37,31 @@ pub struct UserConfigFile {
     pub terminal: TerminalConfigFile,
     #[serde(default)]
     pub general: GeneralConfigFile,
+    #[serde(default)]
+    pub lsp: LspConfigFile,
+}
+
+/// Per-language language-server invocation stored in `user.json`. Missing parts
+/// fall back to the built-in defaults (`rust-analyzer`, `clangd`,
+/// `typescript-language-server --stdio`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspServerFile {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspConfigFile {
+    #[serde(default)]
+    pub rust: Option<LspServerFile>,
+    #[serde(default)]
+    pub cpp: Option<LspServerFile>,
+    #[serde(default)]
+    pub typescript: Option<LspServerFile>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,6 +105,7 @@ pub struct UserConfig {
     pub editor: EditorSettings,
     pub terminal: TerminalSettings,
     pub general: GeneralSettings,
+    pub lsp: LspSettings,
     pub config_dir: String,
     pub notice: Option<String>,
 }
@@ -134,6 +160,39 @@ impl Default for GeneralSettings {
     }
 }
 
+/// A fully-resolved language-server invocation.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LspServerSettings {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+/// The resolved LSP configuration for every language this app supports.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LspSettings {
+    pub rust: LspServerSettings,
+    pub cpp: LspServerSettings,
+    pub typescript: LspServerSettings,
+}
+
+fn server(command: &str, args: &[&str]) -> LspServerSettings {
+    LspServerSettings {
+        command: command.to_string(),
+        args: args.iter().map(|a| a.to_string()).collect(),
+    }
+}
+
+impl Default for LspSettings {
+    fn default() -> Self {
+        Self {
+            rust: server("rust-analyzer", &[]),
+            cpp: server("clangd", &[]),
+            typescript: server("typescript-language-server", &["--stdio"]),
+        }
+    }
+}
+
 fn defaults() -> HashMap<String, String> {
     KEYBINDING_DEFAULTS
         .iter()
@@ -145,6 +204,49 @@ fn sanitize_word_wrap(value: &str) -> String {
     match value {
         "off" | "on" | "wordWrapColumn" => value.to_string(),
         _ => "off".to_string(),
+    }
+}
+
+fn server_file(settings: &LspServerSettings) -> LspServerFile {
+    LspServerFile {
+        command: Some(settings.command.clone()),
+        args: Some(settings.args.clone()),
+    }
+}
+
+/// Merge one stored server with its default: a blank command or an all-blank
+/// args list falls back to the default, so a half-edited entry never yields an
+/// unspawnable server.
+fn sanitize_server(
+    stored: Option<LspServerFile>,
+    default: &LspServerSettings,
+) -> LspServerSettings {
+    match stored {
+        Some(entry) => {
+            let command = entry
+                .command
+                .map(|c| c.trim().to_string())
+                .filter(|c| !c.is_empty())
+                .unwrap_or_else(|| default.command.clone());
+            let args = entry
+                .args
+                .unwrap_or_else(|| default.args.clone())
+                .into_iter()
+                .map(|a| a.trim().to_string())
+                .filter(|a| !a.is_empty())
+                .collect();
+            LspServerSettings { command, args }
+        }
+        None => default.clone(),
+    }
+}
+
+fn resolve_lsp(file: &LspConfigFile) -> LspSettings {
+    let defaults = LspSettings::default();
+    LspSettings {
+        rust: sanitize_server(file.rust.clone(), &defaults.rust),
+        cpp: sanitize_server(file.cpp.clone(), &defaults.cpp),
+        typescript: sanitize_server(file.typescript.clone(), &defaults.typescript),
     }
 }
 
@@ -169,6 +271,13 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
     g.restore_last_workspace = Some(g.restore_last_workspace.unwrap_or(true));
     g.confirm_before_close = Some(g.confirm_before_close.unwrap_or(true));
 
+    let lsp = resolve_lsp(&file.lsp);
+    file.lsp = LspConfigFile {
+        rust: Some(server_file(&lsp.rust)),
+        cpp: Some(server_file(&lsp.cpp)),
+        typescript: Some(server_file(&lsp.typescript)),
+    };
+
     file
 }
 
@@ -177,8 +286,10 @@ fn parse_user_config(text: &str) -> UserConfig {
     let editor = EditorSettings::default();
     let terminal = TerminalSettings::default();
     let general = GeneralSettings::default();
+    let lsp = LspSettings::default();
     match serde_json::from_str::<UserConfigFile>(text) {
         Ok(file) => {
+            let lsp = resolve_lsp(&file.lsp);
             let file = sanitize_file(file);
             let mut keybindings = keybindings;
             for (action, chord) in &file.keybindings {
@@ -208,6 +319,7 @@ fn parse_user_config(text: &str) -> UserConfig {
                         .unwrap_or(true),
                     confirm_before_close: file.general.confirm_before_close.unwrap_or(true),
                 },
+                lsp,
                 config_dir: String::new(),
                 notice: None,
             }
@@ -217,6 +329,7 @@ fn parse_user_config(text: &str) -> UserConfig {
             editor,
             terminal,
             general,
+            lsp,
             config_dir: String::new(),
             notice: Some("user.json 格式错误，已使用默认配置".to_string()),
         },
@@ -244,6 +357,7 @@ pub fn load(app: &AppHandle) -> UserConfig {
         editor: EditorSettings::default(),
         terminal: TerminalSettings::default(),
         general: GeneralSettings::default(),
+        lsp: LspSettings::default(),
         config_dir: config_dir.clone(),
         notice: None,
     };
@@ -298,7 +412,7 @@ pub fn configured_shell(app: &AppHandle) -> String {
 mod tests {
     use super::{
         defaults, parse_user_config, sanitize_file, EditorSettings, GeneralSettings,
-        TerminalSettings, UserConfig, UserConfigFile,
+        LspSettings, TerminalSettings, UserConfig, UserConfigFile,
     };
 
     #[test]
@@ -391,6 +505,44 @@ mod tests {
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
+        assert_eq!(
+            file.lsp.rust.as_ref().and_then(|s| s.command.as_deref()),
+            Some("rust-analyzer")
+        );
+        assert_eq!(
+            file.lsp.cpp.as_ref().and_then(|s| s.command.as_deref()),
+            Some("clangd")
+        );
+        assert_eq!(
+            file.lsp
+                .typescript
+                .as_ref()
+                .and_then(|s| s.args.clone()),
+            Some(vec!["--stdio".to_string()])
+        );
+    }
+
+    #[test]
+    fn lsp_defaults_are_used_when_missing() {
+        let cfg = parse_user_config("{}");
+        assert_eq!(cfg.lsp.rust.command, "rust-analyzer");
+        assert!(cfg.lsp.rust.args.is_empty());
+        assert_eq!(cfg.lsp.cpp.command, "clangd");
+        assert!(cfg.lsp.cpp.args.is_empty());
+        assert_eq!(cfg.lsp.typescript.command, "typescript-language-server");
+        assert_eq!(cfg.lsp.typescript.args, vec!["--stdio".to_string()]);
+    }
+
+    #[test]
+    fn parses_lsp_overrides_and_fills_blanks() {
+        let cfg = parse_user_config(
+            r#"{"lsp":{"cpp":{"command":"  C:\\tools\\clangd.exe  ","args":["--background-index"]},"rust":{"command":"  "}}}"#,
+        );
+        assert_eq!(cfg.lsp.cpp.command, r"C:\tools\clangd.exe");
+        assert_eq!(cfg.lsp.cpp.args, vec!["--background-index".to_string()]);
+        // A blank command falls back to the default, and missing args inherit.
+        assert_eq!(cfg.lsp.rust.command, "rust-analyzer");
+        assert_eq!(cfg.lsp.typescript.command, "typescript-language-server");
     }
 
     #[test]
@@ -441,6 +593,7 @@ mod tests {
                 restore_last_workspace: false,
                 confirm_before_close: false,
             },
+            lsp: LspSettings::default(),
             config_dir: r"C:\Users\test\AppData\Roaming\com.longanl.lite-ide".to_string(),
             notice: None,
         };
@@ -455,6 +608,7 @@ mod tests {
         assert!(text.contains(r#""defaultShell":"cmd.exe""#), "{text}");
         assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
         assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");
+        assert!(text.contains(r#""typescript":{"command":"typescript-language-server","args":["--stdio"]}"#), "{text}");
         assert!(!text.contains("config_dir"), "{text}");
         assert!(!text.contains("font_size"), "{text}");
     }

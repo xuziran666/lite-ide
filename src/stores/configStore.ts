@@ -7,6 +7,7 @@ import {
 import type {
   EditorSettings,
   GeneralSettings,
+  LspConfig,
   TerminalSettings,
   UserConfig,
   UserConfigPatch,
@@ -35,12 +36,31 @@ const DEFAULT_GENERAL: GeneralSettings = {
   confirmBeforeClose: true,
 };
 
+const DEFAULT_LSP: LspConfig = {
+  rust: { command: "rust-analyzer", args: [] },
+  cpp: { command: "clangd", args: [] },
+  typescript: { command: "typescript-language-server", args: ["--stdio"] },
+};
+
+/** Deep-clone the LSP config so persisted patches never share nested objects. */
+function cloneLsp(lsp: LspConfig): LspConfig {
+  return {
+    rust: { command: lsp.rust.command, args: [...lsp.rust.args] },
+    cpp: { command: lsp.cpp.command, args: [...lsp.cpp.args] },
+    typescript: {
+      command: lsp.typescript.command,
+      args: [...lsp.typescript.args],
+    },
+  };
+}
+
 interface ConfigStore {
   loaded: boolean;
   keybindings: KeybindingMap;
   editor: EditorSettings;
   terminal: TerminalSettings;
   general: GeneralSettings;
+  lsp: LspConfig;
   shells: string[];
   configDir: string;
   settingsOpen: boolean;
@@ -68,6 +88,7 @@ const baseConfig = (): UserConfigPatch => ({
   editor: { ...DEFAULT_EDITOR },
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
+  lsp: cloneLsp(DEFAULT_LSP),
 });
 
 export const useConfigStore = create<ConfigStore>((set, get) => ({
@@ -76,6 +97,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   editor: { ...DEFAULT_EDITOR },
   terminal: { ...DEFAULT_TERMINAL },
   general: { ...DEFAULT_GENERAL },
+  lsp: cloneLsp(DEFAULT_LSP),
   shells: [],
   configDir: "",
   settingsOpen: false,
@@ -90,6 +112,11 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
         editor: { ...DEFAULT_EDITOR, ...config.editor },
         terminal: { ...DEFAULT_TERMINAL, ...config.terminal },
         general: { ...DEFAULT_GENERAL, ...config.general },
+        lsp: {
+          rust: { ...DEFAULT_LSP.rust, ...config.lsp?.rust },
+          cpp: { ...DEFAULT_LSP.cpp, ...config.lsp?.cpp },
+          typescript: { ...DEFAULT_LSP.typescript, ...config.lsp?.typescript },
+        },
         configDir: config.configDir,
         notice: config.notice,
       });
@@ -114,6 +141,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.editor = { ...editor };
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
+    full.lsp = cloneLsp(state.lsp);
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -130,6 +158,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.editor = { ...state.editor };
     full.terminal = { ...terminal };
     full.general = { ...state.general };
+    full.lsp = cloneLsp(state.lsp);
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -146,6 +175,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.editor = { ...state.editor };
     full.terminal = { ...state.terminal };
     full.general = { ...general };
+    full.lsp = cloneLsp(state.lsp);
     try {
       await setUserConfig(full);
     } catch (err) {
@@ -177,6 +207,7 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     full.editor = { ...state.editor };
     full.terminal = { ...state.terminal };
     full.general = { ...state.general };
+    full.lsp = cloneLsp(state.lsp);
     try {
       await setUserConfig(full);
       return { ok: true };
@@ -200,4 +231,22 @@ export async function loadShells(force = false): Promise<void> {
   } catch (err) {
     useUiStore.getState().showToast(`检测外壳失败: ${String(err)}`, "error");
   }
+}
+
+/**
+ * The configured server argv for a language id, read from the live config.
+ * Returns undefined for unknown languages (no override, backend default wins).
+ */
+export function lspCommandFor(language: string): string[] | undefined {
+  const { lsp } = useConfigStore.getState();
+  const entry =
+    language === "rust"
+      ? lsp.rust
+      : language === "cpp"
+        ? lsp.cpp
+        : language === "typescript"
+          ? lsp.typescript
+          : undefined;
+  if (!entry || !entry.command) return undefined;
+  return [entry.command, ...entry.args];
 }

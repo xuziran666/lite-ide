@@ -1,10 +1,10 @@
 import * as monaco from "monaco-editor";
 
 /**
- * Lightweight C/C++ document-symbol provider. Monaco ships tokenization for
- * cpp but no symbol provider, so the Outline panel would always be empty for C
- * and C++ files. This scans declarations with brace-depth tracking — a simple
- * line scanner, NOT a full AST — and assembles a hierarchy out of the depths.
+ * Lightweight C/C++ document-symbol scanner. clangd (via the built-in LSP
+ * client) is the primary Outline source; this scans declarations with
+ * brace-depth tracking — a simple line scanner, NOT a full AST — and is used as
+ * a fallback when clangd is not running so the Outline panel is not empty.
  */
 
 interface CppSymbol {
@@ -179,17 +179,13 @@ function toDocumentSymbols(nodes: CppNode[]): monaco.languages.DocumentSymbol[] 
   }));
 }
 
-let registered = false;
-
-export function registerCppOutline(): void {
-  if (registered) return;
-  registered = true;
-  monaco.languages.registerDocumentSymbolProvider(
-    [{ language: "cpp" }, { language: "c" }],
-    {
-      provideDocumentSymbols(model) {
-        return toDocumentSymbols(buildTree(model.getValue().split("\n")));
-      },
-    },
-  );
+/**
+ * Regex-based document symbols for a C/C++ model. Used as an Outline fallback
+ * when clangd is unavailable; the LSP client registers the primary
+ * document-symbol provider and delegates here on failure/empty.
+ */
+export function cppDocumentSymbols(
+  model: monaco.editor.ITextModel,
+): monaco.languages.DocumentSymbol[] {
+  return toDocumentSymbols(buildTree(model.getValue().split("\n")));
 }

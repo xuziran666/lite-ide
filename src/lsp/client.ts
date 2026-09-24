@@ -25,38 +25,55 @@ import {
 import { openAndReveal } from "../utils/reveal";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useUiStore } from "../stores/uiStore";
+import {
+  LSP_LANGUAGES,
+  LSP_MONACO_SELECTOR,
+  LSP_TRIGGER_CHARACTERS,
+  languageById,
+  languageForModel,
+  serverCommand,
+  type LspLanguage,
+} from "./languages";
 
 /**
- * Built-in LSP client wiring for the `rust` language, driven by rust-analyzer
- * over the Tauri commands in `src-tauri/src/commands/lsp.rs`. One server per
- * workspace, started lazily when the first `.rs` file opens and stopped when
- * the workspace switches, the app closes, or the last Rust file is closed.
+ * Built-in LSP client, shared by every language (rust-analyzer, clangd and
+ * typescript-language-server). One server per language per workspace, started
+ * lazily when the first file of that language opens and stopped on workspace
+ * switch, app exit, or when the last file of that language closes.
  *
- * The server speaks to Monaco through the standard `monaco.languages` provider
- * APIs only - no monaco-lsp-client integration.
+ * A single set of Monaco providers is registered for all served languages and
+ * dispatches to the right server based on the model's language — no per-language
+ * provider duplication. The servers speak through the standard
+ * `monaco.languages` provider APIs only.
  */
 
-const MARKER_OWNER = "rust-analyzer";
+const MARKER_OWNER = "lsp";
 const CHANGE_DEBOUNCE_MS = 150;
 
 /** Text-document state: the live model plus its debounced change listener. */
 interface OpenDoc {
   model: monaco.editor.ITextModel;
   listener: monaco.IDisposable;
+  language: string;
 }
 
-/** Root URI the current session runs under, or null when none is live. */
-let startedRoot: string | null = null;
-/** Serializes `ensureServer` so two models opening at once start once. */
-let startGate: Promise<boolean> | null = null;
-/** Open rust documents, keyed by their LSP file URI. */
+/** Open documents, keyed by their LSP file URI. */
 const docs = new Map<string, OpenDoc>();
 /** Debounce timers per document URI. */
 const changeTimers = new Map<string, number>();
+/** Client-side ids of languages whose server is currently live. */
+const activeLanguages = new Set<string>();
+/** Serializes `ensureServer` so two models opening at once start once. */
+const startGates = new Map<string, Promise<boolean>>();
 
-function isRust(model: monaco.editor.ITextModel): boolean {
-  return model.getLanguageId() === "rust";
-}
+/**
+ * Plain Monaco models created for definition-target hover previews. They are
+ * not tracked by the model store and live only until their language's session
+ * resets (read-only placeholders so Monaco's Ctrl+hover preview and click can
+ * resolve the target's file URI). Once the user actually jumps to a target the
+ * editor store re-reads the file and takes ownership of the model.
+ */
+const previewModels = new Set<monaco.editor.ITextModel>();
 
 /** Non-ASCII-safe normalization of a workspace-backed model key:
  *  strips a Windows extended-length (`\\?\`, seen as `//?/`) prefix so open
@@ -73,7 +90,7 @@ function normalizePathKey(path: string): string {
 /** The model-store-style path key for a model, derived from its URI. */
 function modelPath(model: monaco.editor.ITextModel): string {
   return normalizePathKey(
-    fileUriToPath(model.uri.toString()) ?? model.uri.toString()
+    fileUriToPath(model.uri.toString()) ?? model.uri.toString(),
   );
 }
 
@@ -92,15 +109,16 @@ function findOpenModel(path: string): monaco.editor.ITextModel | undefined {
     .getModels()
     .find(
       (m) =>
-        isRust(m) && normalizePathKey(modelPath(m)).toLowerCase() === needle
+        languageForModel(m) !== undefined &&
+        normalizePathKey(modelPath(m)).toLowerCase() === needle,
     );
 }
 
 /**
- * Windows path matching is case-insensitive (rust-analyzer normalizes the
- * drive letter to lowercase, opened models keep the original case). Return a
- * path that matches an already-open model so we never create a second tab for
- * the same physical file.
+ * Windows path matching is case-insensitive (LSP servers normalize the drive
+ * letter to lowercase, opened models keep the original case). Return a path
+ * that matches an already-open model so we never create a second tab for the
+ * same physical file.
  */
 function matchOpenModelCase(path: string): string {
   const model = findOpenModel(path);
@@ -123,15 +141,6 @@ function isInsideWorkspace(path: string): boolean {
   const root = key(ws).replace(/\/+$/, "");
   return needle === root || needle.startsWith(root + "/");
 }
-
-/**
- * Plain Monaco models created for definition-target hover previews. They are
- * not tracked by the model store and live only until the session resets (they
- * are read-only placeholders so Monaco's Ctrl+hover preview and click can
- * resolve the target's file URI). Once the user actually jumps to a target the
- * editor store re-reads the file and takes ownership of the model.
- */
-const previewModels = new Set<monaco.editor.ITextModel>();
 
 /**
  * Best-effort materialization of a definition target's model. Reads the file
@@ -157,11 +166,7 @@ async function ensureDefinitionModel(path: string): Promise<void> {
     // Re-check: the user may have Ctrl+clicked and opened the target while the
     // read was in flight; creating a second model for the same URI would throw.
     if (monaco.editor.getModel(uri)) return;
-    const model = monaco.editor.createModel(
-      content,
-      languageForPath(key),
-      uri,
-    );
+    const model = monaco.editor.createModel(content, languageForPath(key), uri);
     previewModels.add(model);
     model.onWillDispose(() => previewModels.delete(model));
   } catch {
@@ -169,62 +174,87 @@ async function ensureDefinitionModel(path: string): Promise<void> {
   }
 }
 
-/** Start the session if it isn't running yet. Resolves true when ready. */
-async function ensureServer(triggerPath: string): Promise<boolean> {
-  if (startedRoot !== null) return true;
-  if (startGate) return startGate;
+/** Start a language's session if it isn't running yet. Resolves true when ready. */
+async function ensureServer(
+  language: LspLanguage,
+  triggerPath: string,
+): Promise<boolean> {
+  if (activeLanguages.has(language.id)) return true;
+  const gate = startGates.get(language.id);
+  if (gate) return gate;
 
-  startGate = (async () => {
+  const start = (async () => {
     try {
-      const result = await lspStart(triggerPath);
-      startedRoot = result.rootUri;
+      await lspStart(language.id, triggerPath, serverCommand(language));
+      activeLanguages.add(language.id);
       return true;
     } catch (err) {
-      startedRoot = null;
-      startGate = null;
+      // Allow a retry the next time a file of this language opens.
+      startGates.delete(language.id);
       useUiStore
         .getState()
-        .showToast(`无法启动 rust-analyzer: ${String(err)}`, "error");
+        .showToast(`无法启动 ${language.serverLabel}: ${String(err)}`, "error");
       return false;
     }
   })();
 
-  return startGate;
+  startGates.set(language.id, start);
+  return start;
 }
 
-/** Drop every document reference and clear markers (server stopped/exited). */
-function resetSession(): void {
-  startedRoot = null;
-  startGate = null;
-  for (const { listener } of docs.values()) {
-    listener.dispose();
+/** How many documents of a language are currently open. */
+function openDocCount(languageId: string): number {
+  let count = 0;
+  for (const doc of docs.values()) {
+    if (doc.language === languageId) count += 1;
   }
-  docs.clear();
-  for (const timer of changeTimers.values()) {
-    window.clearTimeout(timer);
+  return count;
+}
+
+/** Drop one language's document references, previews and markers (stopped/exited). */
+function resetLanguage(language: LspLanguage): void {
+  activeLanguages.delete(language.id);
+  startGates.delete(language.id);
+
+  for (const [uri, doc] of [...docs]) {
+    if (doc.language !== language.id) continue;
+    doc.listener.dispose();
+    docs.delete(uri);
+    window.clearTimeout(changeTimers.get(uri));
+    changeTimers.delete(uri);
   }
-  changeTimers.clear();
-  for (const model of previewModels) {
-    if (!model.isDisposed()) model.dispose();
+
+  for (const model of [...previewModels]) {
+    if (languageForModel(model)?.id === language.id && !model.isDisposed()) {
+      model.dispose();
+    }
   }
-  previewModels.clear();
+
   for (const model of monaco.editor.getModels()) {
-    if (isRust(model)) {
+    if (languageForModel(model)?.id === language.id) {
       monaco.editor.setModelMarkers(model, MARKER_OWNER, []);
     }
+  }
+}
+
+/** Reset every language (workspace switch / shutdown). */
+function resetAllLanguages(): void {
+  for (const language of LSP_LANGUAGES) {
+    resetLanguage(language);
   }
 }
 
 function attachChangeListener(
   model: monaco.editor.ITextModel,
   uri: string,
+  languageId: string,
 ): monaco.IDisposable {
   return model.onDidChangeContent(() => {
     if (model.isDisposed()) return;
     window.clearTimeout(changeTimers.get(uri));
     const timer = window.setTimeout(() => {
       changeTimers.delete(uri);
-      void pushChanges(model, uri);
+      void pushChanges(model, uri, languageId);
     }, CHANGE_DEBOUNCE_MS);
     changeTimers.set(uri, timer);
   });
@@ -233,10 +263,11 @@ function attachChangeListener(
 async function pushChanges(
   model: monaco.editor.ITextModel,
   uri: string,
+  languageId: string,
 ): Promise<void> {
   if (model.isDisposed() || !docs.has(uri)) return;
   try {
-    await lspNotify("textDocument/didChange", {
+    await lspNotify(languageId, "textDocument/didChange", {
       textDocument: { uri, version: model.getVersionId() },
       contentChanges: [{ text: model.getValue() }],
     });
@@ -245,25 +276,28 @@ async function pushChanges(
   }
 }
 
-/** Send `didOpen` for a new rust model (idempotent per URI). */
-async function openRustModel(model: monaco.editor.ITextModel): Promise<void> {
-  // Only workspace files are sent to rust-analyzer. Preview models created for
+/** Send `didOpen` for a new served model (idempotent per URI). */
+async function openDocModel(model: monaco.editor.ITextModel): Promise<void> {
+  const language = languageForModel(model);
+  if (!language) return;
+  // Only workspace files are sent to the servers. Preview models created for
   // out-of-workspace targets and read-only external tabs (stdlib sources etc.)
-  // stay local to the editor; sending them to the server would be noise.
+  // stay local to the editor; sending them to a server would be noise.
   if (!isInsideWorkspace(modelPath(model))) return;
+
   const uri = uriFor(model);
   if (docs.has(uri)) return;
 
-  const ok = await ensureServer(modelPath(model));
+  const ok = await ensureServer(language, modelPath(model));
   if (!ok || docs.has(uri)) return;
 
-  const listener = attachChangeListener(model, uri);
-  docs.set(uri, { model, listener });
+  const listener = attachChangeListener(model, uri, language.id);
+  docs.set(uri, { model, listener, language: language.id });
   try {
-    await lspNotify("textDocument/didOpen", {
+    await lspNotify(language.id, "textDocument/didOpen", {
       textDocument: {
         uri,
-        languageId: "rust",
+        languageId: model.getLanguageId(),
         version: model.getVersionId(),
         text: model.getValue(),
       },
@@ -274,9 +308,12 @@ async function openRustModel(model: monaco.editor.ITextModel): Promise<void> {
   }
 }
 
-/** Send `didClose` and stop the server when no Rust files remain open. */
-function closeRustModel(model: monaco.editor.ITextModel): void {
+/** Send `didClose` and stop a language's server when no files of it remain. */
+function closeDocModel(model: monaco.editor.ITextModel): void {
+  const language = languageForModel(model);
+  if (!language) return;
   if (!isInsideWorkspace(modelPath(model))) return;
+
   const uri = uriFor(model);
   const doc = docs.get(uri);
   if (doc) {
@@ -285,16 +322,16 @@ function closeRustModel(model: monaco.editor.ITextModel): void {
     doc.listener.dispose();
     docs.delete(uri);
   }
-  void lspNotify("textDocument/didClose", { textDocument: { uri } }).catch(
-    () => {},
-  );
-  if (docs.size === 0 && startedRoot !== null) {
-    void lspStop()
-      .then(() => resetSession())
+  void lspNotify(language.id, "textDocument/didClose", {
+    textDocument: { uri },
+  }).catch(() => {});
+  if (openDocCount(language.id) === 0 && activeLanguages.has(language.id)) {
+    void lspStop(language.id)
+      .then(() => resetLanguage(language))
       .catch((err) =>
         useUiStore
           .getState()
-          .showToast(`停止 rust-analyzer 失败: ${String(err)}`, "error"),
+          .showToast(`停止 ${language.serverLabel} 失败: ${String(err)}`, "error"),
       );
   }
 }
@@ -332,9 +369,10 @@ function toMonacoCompletion(
   if (typeof doc === "string") {
     item.documentation = { value: doc, isTrusted: false };
   } else if (doc && typeof doc.value === "string") {
-    const value = doc.language && doc.value
-      ? `\`\`\`${doc.language}\n${doc.value}\n\`\`\``
-      : doc.value;
+    const value =
+      doc.language && doc.value
+        ? `\`\`\`${doc.language}\n${doc.value}\n\`\`\``
+        : doc.value;
     item.documentation = { value, isTrusted: false };
   }
 
@@ -384,18 +422,21 @@ interface DefinitionTarget {
 let definitionCacheKey: string | null = null;
 let definitionCacheValue: DefinitionTarget[] | null = null;
 
-/** Resolve `textDocument/definition` for a model position against the live
- *  rust-analyzer session. Returns [] when there is nothing or a failure. */
+/** Resolve `textDocument/definition` for a model position against the serving
+ *  language's session. Returns [] when there is nothing or a failure. */
 async function fetchDefinitions(
   model: monaco.editor.ITextModel,
   position: monaco.Position,
 ): Promise<DefinitionTarget[]> {
+  const language = languageForModel(model);
+  if (!language) return [];
+
   const key = `${model.uri.toString()}:${model.getVersionId()}:${position.lineNumber}:${position.column}`;
   if (definitionCacheKey === key && definitionCacheValue !== null) {
     return definitionCacheValue;
   }
   try {
-    const result = await lspRequest("textDocument/definition", {
+    const result = await lspRequest(language.id, "textDocument/definition", {
       textDocument: { uri: uriFor(model) },
       position: monacoPositionToLsp(position.lineNumber, position.column),
     });
@@ -441,28 +482,31 @@ async function jumpToDefinition(
 
 let registered = false;
 
-/** Wire rust-analyzer into Monaco (idempotent; called once from monacoSetup). */
-export function registerRustLsp(): void {
+/** Wire every language server into Monaco (idempotent; called once). */
+export function registerLspClient(): void {
   if (registered) return;
   registered = true;
 
   monaco.editor.onDidCreateModel((model) => {
-    if (isRust(model)) {
-      void openRustModel(model);
+    if (languageForModel(model)) {
+      void openDocModel(model);
     }
   });
   monaco.editor.onWillDisposeModel((model) => {
-    if (isRust(model)) {
-      closeRustModel(model);
+    if (languageForModel(model)) {
+      closeDocModel(model);
     }
   });
 
-  monaco.languages.registerCompletionItemProvider("rust", {
-    triggerCharacters: [".", ":"],
+  monaco.languages.registerCompletionItemProvider(LSP_MONACO_SELECTOR, {
+    triggerCharacters: LSP_TRIGGER_CHARACTERS,
     async provideCompletionItems(model, position, context, token) {
+      const language = languageForModel(model);
+      if (!language) return { suggestions: [] };
+
       const suggestions: monaco.languages.CompletionItem[] = [];
       try {
-        const result = await lspRequest("textDocument/completion", {
+        const result = await lspRequest(language.id, "textDocument/completion", {
           textDocument: { uri: uriFor(model) },
           position: monacoPositionToLsp(position.lineNumber, position.column),
           context: {
@@ -497,10 +541,12 @@ export function registerRustLsp(): void {
     },
   });
 
-  monaco.languages.registerHoverProvider("rust", {
+  monaco.languages.registerHoverProvider(LSP_MONACO_SELECTOR, {
     async provideHover(model, position, token) {
+      const language = languageForModel(model);
+      if (!language) return null;
       try {
-        const result = await lspRequest("textDocument/hover", {
+        const result = await lspRequest(language.id, "textDocument/hover", {
           textDocument: { uri: uriFor(model) },
           position: monacoPositionToLsp(position.lineNumber, position.column),
         });
@@ -523,9 +569,10 @@ export function registerRustLsp(): void {
           ) {
             const markdown = entry as { language?: string; value: string };
             contents.push({
-              value: markdown.language && markdown.value
-                ? `\`\`\`${markdown.language}\n${markdown.value}\n\`\`\``
-                : markdown.value,
+              value:
+                markdown.language && markdown.value
+                  ? `\`\`\`${markdown.language}\n${markdown.value}\n\`\`\``
+                  : markdown.value,
               isTrusted: false,
             });
           }
@@ -541,7 +588,7 @@ export function registerRustLsp(): void {
     },
   });
 
-  monaco.languages.registerDefinitionProvider("rust", {
+  monaco.languages.registerDefinitionProvider(LSP_MONACO_SELECTOR, {
     async provideDefinition(model, position, token) {
       const targets = await fetchDefinitions(model, position);
       if (token.isCancellationRequested || targets.length === 0) return [];
@@ -561,42 +608,55 @@ export function registerRustLsp(): void {
     },
   });
 
-  monaco.languages.registerDocumentSymbolProvider("rust", {
-    displayName: "rust-analyzer",
+  monaco.languages.registerDocumentSymbolProvider(LSP_MONACO_SELECTOR, {
+    displayName: "lsp",
     async provideDocumentSymbols(model, token) {
+      const language = languageForModel(model);
+      if (!language) return [];
+      const fallback = language.fallbackDocumentSymbols;
       try {
-        const result = await lspRequest("textDocument/documentSymbol", {
-          textDocument: { uri: uriFor(model) },
-        });
-        if (token.isCancellationRequested || !result) return [];
-        const symbols = Array.isArray(result) ? result : [];
-        return toDocumentSymbols(symbols as LspSymbol[]);
+        const result = await lspRequest(
+          language.id,
+          "textDocument/documentSymbol",
+          { textDocument: { uri: uriFor(model) } },
+        );
+        if (token.isCancellationRequested) return [];
+        const symbols = Array.isArray(result) ? (result as LspSymbol[]) : [];
+        if (symbols.length === 0) return fallback ? fallback(model) : [];
+        return toDocumentSymbols(symbols);
       } catch {
-        return [];
+        // Server unavailable — keep the Outline useful via the local fallback.
+        return fallback ? fallback(model) : [];
       }
     },
   });
 
   void listen<{
+    language: string;
     path: string;
     diagnostics: LspDiagnostic[];
   }>("lsp-diagnostics", (event) => {
-    const model = findOpenModel(event.payload.path);
+    const { language, path, diagnostics } = event.payload;
+    const model = findOpenModel(path);
     if (!model || model.isDisposed()) return;
+    // Ignore diagnostics addressed to a different language's model.
+    if (languageForModel(model)?.id !== language) return;
     monaco.editor.setModelMarkers(
       model,
       MARKER_OWNER,
-      lspDiagnosticsToMonacoMarkers(event.payload.diagnostics),
+      lspDiagnosticsToMonacoMarkers(diagnostics),
     );
   });
 
-  void listen<{ message?: string }>("lsp-exited", (event) => {
-    if (startedRoot === null) return;
-    resetSession();
+  void listen<{ language: string; message?: string }>("lsp-exited", (event) => {
+    const { language, message } = event.payload;
+    if (!activeLanguages.has(language)) return;
+    const descriptor = languageById(language);
+    if (descriptor) resetLanguage(descriptor);
     useUiStore
       .getState()
       .showToast(
-        `rust-analyzer 已退出: ${event.payload?.message ?? "未知原因"}`,
+        `${descriptor?.serverLabel ?? language} 已退出: ${message ?? "未知原因"}`,
         "error",
       );
   });
@@ -614,6 +674,7 @@ export function registerRustLsp(): void {
       const position = e.target.position;
       const model = editor.getModel();
       if (!position || !model || model.isDisposed()) return;
+      if (!languageForModel(model)) return;
       void jumpToDefinition(model, position);
     });
   };
@@ -626,20 +687,20 @@ export function registerRustLsp(): void {
 
   // Deferred: during module initialization `useWorkspaceStore` is still in the
   // import cycle (workspaceStore -> editorStore -> modelStore -> monacoSetup ->
-  // rust.ts), so subscribing eagerly would hit the TDZ. A microtask runs after
-  // the whole module graph has finished evaluating.
+  // lsp/client), so subscribing eagerly would hit the TDZ. A microtask runs
+  // after the whole module graph has finished evaluating.
   queueMicrotask(() => {
     useWorkspaceStore.subscribe((state, prevState) => {
       if (state.workspacePath !== prevState.workspacePath) {
-        resetSession();
+        resetAllLanguages();
       }
     });
   });
 
   // Models created before this module registered (defensive; normally none).
   for (const model of monaco.editor.getModels()) {
-    if (isRust(model)) {
-      void openRustModel(model);
+    if (languageForModel(model)) {
+      void openDocModel(model);
     }
   }
 }

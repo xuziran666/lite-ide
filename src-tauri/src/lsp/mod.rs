@@ -1,9 +1,9 @@
-//! Built-in LSP client (MVP): connects Monaco to an external `rust-analyzer`
-//! process over stdio / JSON-RPC.
+//! Built-in LSP client (MVP): connects Monaco to external language servers
+//! (rust-analyzer, clangd, typescript-language-server) over stdio / JSON-RPC.
 //!
 //! Design rules for this phase:
-//! - Only rust-analyzer (launched from PATH), one server per workspace,
-//!   started lazily when a `.rs` file opens.
+//! - One server per (workspace, language), launched from PATH, started lazily
+//!   when a file of that language opens.
 //! - No main-thread blocking: request/response happen off the event loop and
 //!   the frontend only ever sees `lsp-diagnostics` / `lsp-exited` events plus
 //!   the results of `lsp_start` / `lsp_stop` / `lsp_notify` / `lsp_request`.
@@ -15,12 +15,23 @@ pub mod session;
 pub mod transport;
 pub mod uri;
 
+use std::path::Path;
+
 use serde::Serialize;
 use serde_json::{json, Value};
 
-/// Default server invocation. `rust-analyzer` must be reachable from PATH.
-pub fn default_command() -> Vec<String> {
-    vec!["rust-analyzer".to_string()]
+/// Built-in server invocation for a language id. `rust-analyzer` must be
+/// reachable from PATH; `clangd` and `typescript-language-server` likewise.
+pub fn default_command(language: &str) -> Vec<String> {
+    match language {
+        "cpp" => vec!["clangd".to_string()],
+        "typescript" => vec![
+            "typescript-language-server".to_string(),
+            "--stdio".to_string(),
+        ],
+        // `rust` and any unknown language (defensive fallback).
+        _ => vec!["rust-analyzer".to_string()],
+    }
 }
 
 /// The result returned to the frontend from `lsp_start`.
@@ -49,6 +60,7 @@ pub fn initialize_params(root_uri: &str, process_id: u32) -> Value {
         "capabilities": {
             "textDocument": {
                 "synchronization": { "didSave": false },
+                "publishDiagnostics": { "relatedInformation": true },
                 "completion": {
                     "completionItem": {
                         "snippetSupport": true,
@@ -84,12 +96,29 @@ pub fn find_project_root(start_dir: &std::path::Path, workspace_root: &std::path
     uri::path_to_file_uri(&workspace_root.to_path_buf())
 }
 
-/// Resolve the target command, falling back to `rust-analyzer` from PATH when
-/// no configured override is present.
-pub fn resolve_command(prefer: Option<Vec<String>>) -> Vec<String> {
+/// Resolve the target command, falling back to the language's PATH default
+/// when no configured override is present.
+pub fn resolve_command(language: &str, prefer: Option<Vec<String>>) -> Vec<String> {
     prefer
         .filter(|command| !command.is_empty() && !command[0].is_empty())
-        .unwrap_or_else(default_command)
+        .unwrap_or_else(|| default_command(language))
+}
+
+/// The root URI sent at initialize time.
+/// - Rust prefers the project root (nearest `Cargo.toml`);
+/// - C/C++ and TypeScript prefer the workspace root and let the server discover
+///   their own project files (`compile_commands.json`, `tsconfig.json`).
+///
+/// The trigger file never moves the root outside the workspace, so opening an
+/// external definition target cannot change it.
+pub fn resolve_root(language: &str, trigger_path: Option<&Path>, workspace: &Path) -> String {
+    match language {
+        "rust" => match trigger_path {
+            Some(file) => find_project_root(file, workspace),
+            None => uri::path_to_file_uri(&workspace.to_path_buf()),
+        },
+        _ => uri::path_to_file_uri(&workspace.to_path_buf()),
+    }
 }
 
 #[cfg(test)]
@@ -102,6 +131,12 @@ mod tests {
         assert_eq!(params["processId"], 1234);
         assert_eq!(params["rootUri"], "file:///C:/workspace");
         assert_eq!(params["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"], true);
+        // `publishDiagnostics` must be advertised or typescript-language-server
+        // never pushes diagnostics for open documents.
+        assert_eq!(
+            params["capabilities"]["textDocument"]["publishDiagnostics"]["relatedInformation"],
+            true
+        );
         assert_eq!(params["capabilities"]["workspace"]["configuration"], true);
     }
 
@@ -138,10 +173,44 @@ mod tests {
 
     #[test]
     fn default_command_and_resolution() {
-        assert_eq!(default_command(), vec!["rust-analyzer".to_string()]);
-        assert_eq!(resolve_command(None), vec!["rust-analyzer".to_string()]);
-        assert_eq!(resolve_command(Some(vec!["/x/y".to_string()])), vec!["/x/y".to_string()]);
-        // Empty / blank commands fall back to the default.
-        assert_eq!(resolve_command(Some(vec![])), vec!["rust-analyzer".to_string()]);
+        assert_eq!(default_command("rust"), vec!["rust-analyzer".to_string()]);
+        assert_eq!(default_command("cpp"), vec!["clangd".to_string()]);
+        assert_eq!(
+            default_command("typescript"),
+            vec!["typescript-language-server".to_string(), "--stdio".to_string()]
+        );
+        // Unknown languages fall back to rust-analyzer (defensive).
+        assert_eq!(default_command("weird"), vec!["rust-analyzer".to_string()]);
+
+        assert_eq!(resolve_command("rust", None), vec!["rust-analyzer".to_string()]);
+        assert_eq!(
+            resolve_command("cpp", Some(vec!["/x/y".to_string()])),
+            vec!["/x/y".to_string()]
+        );
+        // Empty / blank commands fall back to the language default.
+        assert_eq!(resolve_command("typescript", Some(vec![])), default_command("typescript"));
+        assert_eq!(
+            resolve_command("cpp", Some(vec!["".to_string()])),
+            vec!["clangd".to_string()]
+        );
+    }
+
+    #[test]
+    fn resolve_root_uses_workspace_for_cpp_and_typescript() {
+        let workspace_root = std::env::temp_dir().join("lite_ide_lsp_root_lang");
+        let project = workspace_root.join("sub");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("Cargo.toml"), "[package]").unwrap();
+        let file = project.join("main.cpp");
+
+        let cpp_root = resolve_root("cpp", Some(&file), &workspace_root);
+        assert!(cpp_root.ends_with("lite_ide_lsp_root_lang"), "{cpp_root}");
+        let ts_root = resolve_root("typescript", Some(&file), &workspace_root);
+        assert!(ts_root.ends_with("lite_ide_lsp_root_lang"), "{ts_root}");
+        // Rust still prefers the nearest Cargo.toml project.
+        let rust_root = resolve_root("rust", Some(&file), &workspace_root);
+        assert!(rust_root.ends_with("sub"), "{rust_root}");
+
+        std::fs::remove_dir_all(&workspace_root).ok();
     }
 }

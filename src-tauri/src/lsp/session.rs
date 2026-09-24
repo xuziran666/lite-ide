@@ -84,11 +84,14 @@ impl RequestIds {
 
 /// The payload emitted to the frontend for `textDocument/publishDiagnostics`.
 ///
-/// `uri` is the LSP document URI as sent by the server; `path` is the same
-/// file normalized into the forward-slash path key the model store uses.
+/// `language` is the client-side language id ("rust" / "cpp" / "typescript")
+/// so the frontend can route the diagnostics; `uri` is the LSP document URI as
+/// sent by the server; `path` is the same file normalized into the
+/// forward-slash path key the model store uses.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LspDiagnosticsEvent {
+    pub language: String,
     pub uri: String,
     pub path: String,
     pub diagnostics: Vec<Value>,
@@ -97,6 +100,10 @@ pub struct LspDiagnosticsEvent {
 /// A live connection to a language server over stdio.
 pub struct LspSession {
     pub app: AppHandle,
+    /// Client-side language id this session serves ("rust" / "cpp" / ...).
+    pub language: String,
+    /// Human-readable server name, used in log/toast messages.
+    pub label: String,
     /// Root folder sent to the server at initialize time.
     pub root_uri: String,
     child: Mutex<Option<Child>>,
@@ -110,10 +117,12 @@ impl LspSession {
     /// Spawn the server process, run the standard `initialize` / `initialized`
     /// handshake and return a ready session.
     ///
-    /// `command` is the argv of the server executable; `root_uri` is the
-    /// workspace root already resolved by the caller (nearest `Cargo.toml`).
+    /// `language` is the client-side language id; `command` is the argv of the
+    /// server executable; `root_uri` is the workspace/project root already
+    /// resolved by the caller.
     pub fn start(
         app: AppHandle,
+        language: &str,
         command: &[String],
         root_uri: String,
         process_id: u32,
@@ -143,12 +152,20 @@ impl LspSession {
             .ok_or_else(|| "无法取得服务器 stdout".to_string())?;
         let stderr = child.stderr.take();
 
+        let label = command
+            .first()
+            .map(|c| c.rsplit(['/', '\\']).next().unwrap_or(c).to_string())
+            .unwrap_or_else(|| language.to_string());
+
         if let Some(stderr) = stderr {
-            std::thread::spawn(move || drain_stderr(stderr));
+            let log_label = label.clone();
+            std::thread::spawn(move || drain_stderr(log_label, stderr));
         }
 
         let session = Arc::new(Self {
             app,
+            language: language.to_string(),
+            label,
             root_uri,
             child: Mutex::new(Some(child)),
             stdin: Mutex::new(stdin),
@@ -201,8 +218,10 @@ impl LspSession {
     /// kill of anything still alive so no orphan survives on Windows.
     pub fn shutdown(&self) {
         let _ = self.request_timeout("shutdown", Value::Null, SHUTDOWN_TIMEOUT);
-        let _ = self.notify("exit", Value::Null);
+        // Mark the session as stopping *before* the exit write so the reader
+        // thread's EOF is not reported as an unexpected crash.
         self.running.store(false, Ordering::SeqCst);
+        let _ = self.write(&build_notification("exit", &Value::Null));
 
         let deadline = Instant::now() + EXIT_GRACE;
         while Instant::now() < deadline {
@@ -245,11 +264,19 @@ impl LspSession {
         }
     }
 
-    /// Mark the session dead and fail every pending request.
+    /// Mark the session dead and fail every pending request. Only emits the
+    /// `lsp-exited` event when the process was still considered alive, so an
+    /// intentional `shutdown()` (workspace switch / last file closed) does not
+    /// surface a spurious "server exited" toast.
     fn mark_failed(&self, message: &str) {
-        self.running.store(false, Ordering::SeqCst);
+        let was_running = self.running.swap(false, Ordering::SeqCst);
         self.pending.fail_all(message);
-        let _ = self.app.emit("lsp-exited", serde_json::json!({ "message": message }));
+        if was_running {
+            let _ = self.app.emit(
+                "lsp-exited",
+                serde_json::json!({ "language": self.language, "message": message }),
+            );
+        }
     }
 
     /// Reap the child if it has already exited; `true` when it is gone.
@@ -312,18 +339,18 @@ fn reader_loop(session: Arc<LspSession>, stdout: ChildStdout) {
                 }
             }
             Ok(None) => {
-                session.mark_failed("rust-analyzer 已退出");
+                session.mark_failed(&format!("{} 已退出", session.label));
                 return;
             }
             Err(TransportError::UnexpectedEof) => {
-                session.mark_failed("rust-analyzer 进程已退出 (stdout 中断)");
+                session.mark_failed(&format!("{} 进程已退出 (stdout 中断)", session.label));
                 return;
             }
             Err(err) => {
                 // A malformed frame or a broken stream is fatal: resyncing is
                 // not worth the complexity for one external server. Never loop
                 // forever on a poisoned stream.
-                session.mark_failed(&format!("rust-analyzer 输出异常: {err}"));
+                session.mark_failed(&format!("{} 输出异常: {err}", session.label));
                 return;
             }
         }
@@ -389,7 +416,7 @@ impl StreamReader {
 
 /// Drain server stderr into the log so a chatty server cannot block on a full
 /// stderr pipe.
-fn drain_stderr(mut stderr: std::process::ChildStderr) {
+fn drain_stderr(label: String, mut stderr: std::process::ChildStderr) {
     let mut buf = [0u8; 1024];
     loop {
         match stderr.read(&mut buf) {
@@ -397,7 +424,7 @@ fn drain_stderr(mut stderr: std::process::ChildStderr) {
             Ok(n) => {
                 let text = String::from_utf8_lossy(&buf[..n]);
                 if !text.trim().is_empty() {
-                    eprintln!("[rust-analyzer] {text}");
+                    eprintln!("[{label}] {text}");
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -469,6 +496,7 @@ fn handle_notification(session: &LspSession, method: &str, params: &Value) {
             let _ = session.app.emit(
                 "lsp-diagnostics",
                 LspDiagnosticsEvent {
+                    language: session.language.clone(),
                     uri,
                     path,
                     diagnostics,
@@ -481,7 +509,7 @@ fn handle_notification(session: &LspSession, method: &str, params: &Value) {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             if !message.is_empty() {
-                eprintln!("[rust-analyzer] {message}");
+                eprintln!("[{}] {message}", session.label);
             }
         }
         // `$/progress` and `telemetry/event` are intentionally ignored through

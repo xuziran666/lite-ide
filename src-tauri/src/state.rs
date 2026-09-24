@@ -12,7 +12,9 @@ pub struct AppState {
     workspace: Mutex<Option<PathBuf>>,
     watcher: Mutex<Option<WorkspaceWatcher>>,
     terminals: Mutex<HashMap<u64, TerminalSession>>,
-    lsp: Mutex<Option<Arc<LspSession>>>,
+    /// Live language-server sessions, keyed by client-side language id
+    /// ("rust" / "cpp" / "typescript"). At most one per language per workspace.
+    lsp: Mutex<HashMap<String, Arc<LspSession>>>,
 }
 
 impl AppState {
@@ -21,14 +23,14 @@ impl AppState {
             workspace: Mutex::new(None),
             watcher: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
-            lsp: Mutex::new(None),
+            lsp: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn set_workspace(&self, path: PathBuf, app: AppHandle) -> Result<(), String> {
         self.kill_all_terminals();
-        // A new workspace never inherits the previous one's language server.
-        self.stop_lsp();
+        // A new workspace never inherits the previous one's language servers.
+        self.stop_all_lsp();
         let mut guard = self
             .workspace
             .lock()
@@ -98,27 +100,49 @@ impl AppState {
         }
     }
 
-    /// The current LSP session, if any.
-    pub fn lsp_session(&self) -> Result<Option<Arc<LspSession>>, String> {
+    /// The current LSP session for a language, if any.
+    pub fn lsp_session(&self, language: &str) -> Result<Option<Arc<LspSession>>, String> {
         self.lsp
             .lock()
-            .map(|guard| guard.clone())
+            .map(|guard| guard.get(language).cloned())
             .map_err(|_| "lsp state is poisoned".to_string())
     }
 
-    /// Store (or clear) the shared LSP session.
-    pub fn set_lsp(&self, session: Option<Arc<LspSession>>) {
-        *self.lsp.lock().unwrap() = session;
+    /// Store (or clear, when `session` is None) the LSP session for a language.
+    pub fn set_lsp(&self, language: &str, session: Option<Arc<LspSession>>) {
+        let mut guard = self.lsp.lock().unwrap_or_else(|p| p.into_inner());
+        match session {
+            Some(session) => {
+                guard.insert(language.to_string(), session);
+            }
+            None => {
+                guard.remove(language);
+            }
+        }
     }
 
-    /// Gracefully shut down the current session (if any) and clear the slot.
-    pub fn stop_lsp(&self) {
+    /// Gracefully shut down one language's session (if any) and clear its slot.
+    pub fn stop_lsp(&self, language: &str) {
         let session = self
             .lsp
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
+            .remove(language);
         if let Some(session) = session {
+            session.shutdown();
+        }
+    }
+
+    /// Gracefully shut down every language server and clear the slots.
+    pub fn stop_all_lsp(&self) {
+        let sessions = {
+            let mut guard = self
+                .lsp
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.drain().map(|(_, session)| session).collect::<Vec<_>>()
+        };
+        for session in sessions {
             session.shutdown();
         }
     }

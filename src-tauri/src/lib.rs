@@ -55,7 +55,7 @@ pub fn run() {
         if let tauri::RunEvent::Exit = event {
             let state = app_handle.state::<AppState>();
             state.kill_all_terminals();
-            state.stop_lsp();
+            state.stop_all_lsp();
         }
     });
 }
