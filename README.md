@@ -59,3 +59,7 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 工程化 —— GitHub Actions：CI（前端 `tsc + vite build` 与 Rust `cargo check`）与 Release（多平台 `tauri-action`，`v*` 标签触发）。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
+
+## 许可证
+
+本项目基于 [MIT 许可证](LICENSE) 发布。
