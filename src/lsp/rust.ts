@@ -1,6 +1,14 @@
 import * as monaco from "monaco-editor";
 import { listen } from "@tauri-apps/api/event";
-import { lspStart, lspStop, lspNotify, lspRequest } from "../commands";
+import {
+  lspStart,
+  lspStop,
+  lspNotify,
+  lspRequest,
+  readFile,
+  readExternalFile,
+} from "../commands";
+import { languageForPath } from "../utils/language";
 import {
   pathToFileUri,
   fileUriToPath,
@@ -55,9 +63,10 @@ function isRust(model: monaco.editor.ITextModel): boolean {
  *  model keys match the clean paths LSP servers report back. Monaco may also
  *  emit the authority without the trailing slash (`file://%3FUNC/...`). */
 function normalizePathKey(path: string): string {
-  const unc = path.match(/^\/\/\?\/?UNC\/(.*)$/i);
+  const forward = path.replace(/\\/g, "/");
+  const unc = forward.match(/^\/\/\?\/?UNC\/(.*)$/i);
   if (unc) return "//" + unc[1];
-  if (path.startsWith("//?")) return path.slice(4).replace(/^\/+/, "");
+  if (forward.startsWith("//?")) return forward.slice(4).replace(/^\/+/, "");
   return path;
 }
 
@@ -102,6 +111,64 @@ function matchOpenModelCase(path: string): string {
     : path;
 }
 
+/** Whether a path belongs to the currently opened workspace. Windows paths are
+ *  compared case-insensitively and normalized for separators and a verbatim
+ *  (`\\?\`) / UNC prefix, mirroring the reveal helper used for navigation. */
+function isInsideWorkspace(path: string): boolean {
+  const ws = useWorkspaceStore.getState().workspacePath;
+  if (!ws) return false;
+  const key = (p: string) =>
+    normalizePathKey(p).replace(/\\/g, "/").toLowerCase();
+  const needle = key(path);
+  const root = key(ws).replace(/\/+$/, "");
+  return needle === root || needle.startsWith(root + "/");
+}
+
+/**
+ * Plain Monaco models created for definition-target hover previews. They are
+ * not tracked by the model store and live only until the session resets (they
+ * are read-only placeholders so Monaco's Ctrl+hover preview and click can
+ * resolve the target's file URI). Once the user actually jumps to a target the
+ * editor store re-reads the file and takes ownership of the model.
+ */
+const previewModels = new Set<monaco.editor.ITextModel>();
+
+/**
+ * Best-effort materialization of a definition target's model. Reads the file
+ * (from the workspace or externally) and creates a plain Monaco model so the
+ * native hover preview works; errors are swallowed — the Ctrl+click handler
+ * surfaces them through the editor store instead.
+ */
+async function ensureDefinitionModel(path: string): Promise<void> {
+  const matched = matchOpenModelCase(path);
+  if (findOpenModel(matched)) return;
+
+  const key = matched.replace(/\\/g, "/");
+  const uri = monaco.Uri.file(key);
+  if (monaco.editor.getModel(uri)) return;
+
+  try {
+    let content: string;
+    if (isInsideWorkspace(matched)) {
+      content = await readFile(matched);
+    } else {
+      content = await readExternalFile(matched);
+    }
+    // Re-check: the user may have Ctrl+clicked and opened the target while the
+    // read was in flight; creating a second model for the same URI would throw.
+    if (monaco.editor.getModel(uri)) return;
+    const model = monaco.editor.createModel(
+      content,
+      languageForPath(key),
+      uri,
+    );
+    previewModels.add(model);
+    model.onWillDispose(() => previewModels.delete(model));
+  } catch {
+    // Unreadable target — nothing to preview, the click path still reports it.
+  }
+}
+
 /** Start the session if it isn't running yet. Resolves true when ready. */
 async function ensureServer(triggerPath: string): Promise<boolean> {
   if (startedRoot !== null) return true;
@@ -137,6 +204,10 @@ function resetSession(): void {
     window.clearTimeout(timer);
   }
   changeTimers.clear();
+  for (const model of previewModels) {
+    if (!model.isDisposed()) model.dispose();
+  }
+  previewModels.clear();
   for (const model of monaco.editor.getModels()) {
     if (isRust(model)) {
       monaco.editor.setModelMarkers(model, MARKER_OWNER, []);
@@ -176,6 +247,10 @@ async function pushChanges(
 
 /** Send `didOpen` for a new rust model (idempotent per URI). */
 async function openRustModel(model: monaco.editor.ITextModel): Promise<void> {
+  // Only workspace files are sent to rust-analyzer. Preview models created for
+  // out-of-workspace targets and read-only external tabs (stdlib sources etc.)
+  // stay local to the editor; sending them to the server would be noise.
+  if (!isInsideWorkspace(modelPath(model))) return;
   const uri = uriFor(model);
   if (docs.has(uri)) return;
 
@@ -201,6 +276,7 @@ async function openRustModel(model: monaco.editor.ITextModel): Promise<void> {
 
 /** Send `didClose` and stop the server when no Rust files remain open. */
 function closeRustModel(model: monaco.editor.ITextModel): void {
+  if (!isInsideWorkspace(modelPath(model))) return;
   const uri = uriFor(model);
   const doc = docs.get(uri);
   if (doc) {
@@ -294,6 +370,71 @@ interface LspLocation {
   range?: LspRange;
   targetSelectionRange?: LspRange;
   targetRange?: LspRange;
+}
+
+/** A normalized definition target: an absolute local path plus 1-based x/y. */
+interface DefinitionTarget {
+  path: string;
+  line: number;
+  column: number;
+}
+
+/** One-slot cache so a Ctrl+hover (provider) and the following Ctrl+click
+ *  (mouse handler) at the same position share a single LSP round-trip. */
+let definitionCacheKey: string | null = null;
+let definitionCacheValue: DefinitionTarget[] | null = null;
+
+/** Resolve `textDocument/definition` for a model position against the live
+ *  rust-analyzer session. Returns [] when there is nothing or a failure. */
+async function fetchDefinitions(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): Promise<DefinitionTarget[]> {
+  const key = `${model.uri.toString()}:${model.getVersionId()}:${position.lineNumber}:${position.column}`;
+  if (definitionCacheKey === key && definitionCacheValue !== null) {
+    return definitionCacheValue;
+  }
+  try {
+    const result = await lspRequest("textDocument/definition", {
+      textDocument: { uri: uriFor(model) },
+      position: monacoPositionToLsp(position.lineNumber, position.column),
+    });
+    const list = Array.isArray(result) ? result : result ? [result] : [];
+    const targets: DefinitionTarget[] = [];
+    for (const entry of list) {
+      const loc = entry as LspLocation;
+      const uri = loc.uri ?? loc.targetUri;
+      const range = loc.range ?? loc.targetSelectionRange ?? loc.targetRange;
+      const path = uri ? fileUriToPath(uri) : undefined;
+      if (!path || !range) continue;
+      targets.push({
+        path,
+        line: range.start.line + 1,
+        column: range.start.character + 1,
+      });
+    }
+    // Only cache a hit; caching an empty result would permanently block a
+    // Ctrl+click jump if the first hover raced the server coming up.
+    if (targets.length > 0) {
+      definitionCacheKey = key;
+      definitionCacheValue = targets;
+    }
+    return targets;
+  } catch {
+    return [];
+  }
+}
+
+/** Resolve and open the first definition target of a Ctrl/Cmd+clicked symbol. */
+async function jumpToDefinition(
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): Promise<void> {
+  const targets = await fetchDefinitions(model, position);
+  if (targets.length === 0) return;
+  const target = targets[0];
+  const path = matchOpenModelCase(target.path);
+  await openAndReveal(path, target.line, target.column);
 }
 
 // --- Registration ----------------------------------------------------------
@@ -402,44 +543,21 @@ export function registerRustLsp(): void {
 
   monaco.languages.registerDefinitionProvider("rust", {
     async provideDefinition(model, position, token) {
-      try {
-        const result = await lspRequest("textDocument/definition", {
-          textDocument: { uri: uriFor(model) },
-          position: monacoPositionToLsp(position.lineNumber, position.column),
-        });
-        if (token.isCancellationRequested || !result) return [];
+      const targets = await fetchDefinitions(model, position);
+      if (token.isCancellationRequested || targets.length === 0) return [];
 
-        const list = Array.isArray(result) ? result : [result];
-        const targets: {
-          path: string;
-          line: number;
-          column: number;
-        }[] = [];
-        for (const entry of list) {
-          const loc = entry as LspLocation;
-          const uri = loc.uri ?? loc.targetUri;
-          const range = loc.range ?? loc.targetSelectionRange ?? loc.targetRange;
-          const path = uri ? fileUriToPath(uri) : undefined;
-          if (!path || !range) continue;
-          targets.push({
-            path,
-            line: range.start.line + 1,
-            column: range.start.character + 1,
-          });
-        }
+      const paths = targets.map((t) => matchOpenModelCase(t.path));
+      // Materialize the first target's model so Monaco's Ctrl+hover preview and
+      // the native "1 definition" affordance can resolve the file URI. Opening
+      // must NOT happen here: Monaco also invokes this provider on plain
+      // Ctrl+mouse-move, and navigating from inside it caused the auto-jump on
+      // hover. Navigation is handled by our own Ctrl/Cmd+click mouse handler.
+      await ensureDefinitionModel(paths[0]);
 
-        if (targets.length > 0) {
-          const path = matchOpenModelCase(targets[0].path);
-          await openAndReveal(path, targets[0].line, targets[0].column);
-        }
-        const paths = targets.map((t) => matchOpenModelCase(t.path));
-        return targets.map((t, i) => ({
-          uri: monaco.Uri.file(paths[i]),
-          range: new monaco.Range(t.line, t.column, t.line, t.column),
-        }));
-      } catch {
-        return [];
-      }
+      return targets.map((t, i) => ({
+        uri: monaco.Uri.file(paths[i]),
+        range: new monaco.Range(t.line, t.column, t.line, t.column),
+      }));
     },
   });
 
@@ -482,6 +600,29 @@ export function registerRustLsp(): void {
         "error",
       );
   });
+
+  // Ctrl/Cmd+Left-click navigation. Monaco's native definition click cannot
+  // switch an editor to a different file in this single-editor setup, so we
+  // hook a minimal native mouse-down that jumps to the resolved target. It only
+  // reacts to Ctrl (or Cmd on macOS) + left click on text content; plain hovers
+  // and plain clicks keep their default behavior.
+  const attachMouseHooks = (editor: monaco.editor.ICodeEditor) => {
+    return editor.onMouseDown((e) => {
+      if (!e.event.leftButton) return;
+      if (!(e.event.ctrlKey || e.event.metaKey)) return;
+      if (e.target.type !== monaco.editor.MouseTargetType.CONTENT_TEXT) return;
+      const position = e.target.position;
+      const model = editor.getModel();
+      if (!position || !model || model.isDisposed()) return;
+      void jumpToDefinition(model, position);
+    });
+  };
+  monaco.editor.onDidCreateEditor((editor) => {
+    attachMouseHooks(editor);
+  });
+  for (const editor of monaco.editor.getEditors()) {
+    attachMouseHooks(editor);
+  }
 
   // Deferred: during module initialization `useWorkspaceStore` is still in the
   // import cycle (workspaceStore -> editorStore -> modelStore -> monacoSetup ->

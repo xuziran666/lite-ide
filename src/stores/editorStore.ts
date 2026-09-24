@@ -3,6 +3,7 @@ import type { CursorInfo, Tab } from "../types";
 import {
   listDir,
   readFile,
+  readExternalFile,
   readGlobalFile,
   writeFile,
   writeGlobalFile,
@@ -37,6 +38,9 @@ interface EditorStore {
   cursor: CursorInfo | null;
   openFile: (path: string) => Promise<void>;
   openGlobalFile: (name: string, fallbackContent?: string) => Promise<void>;
+  /** Open a file from outside the workspace (e.g. an LSP definition jump into
+   *  the standard library) as a read-only tab. Never dirty, never saveable. */
+  openExternalFile: (path: string) => Promise<void>;
   setActive: (path: string) => void;
   closeTab: (path: string, record?: boolean) => void;
   closeMany: (
@@ -170,6 +174,45 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
   },
 
+  openExternalFile: async (path: string) => {
+    if (get().openFiles.some((t) => t.path === path)) {
+      set({ activePath: path, error: null });
+      return;
+    }
+
+    let content: string;
+    try {
+      content = await readExternalFile(path);
+    } catch (e) {
+      set({ error: String(e) });
+      return;
+    }
+
+    if (get().openFiles.some((t) => t.path === path)) {
+      set({ activePath: path, error: null });
+      return;
+    }
+
+    // Read-only: never mark the tab dirty no matter what is typed, so closing
+    // it never asks to save.
+    modelStore.createModel(path, content, () => {});
+
+    set((s) => ({
+      openFiles: [
+        ...s.openFiles,
+        {
+          path,
+          name: basename(path),
+          language: languageForPath(path),
+          dirty: false,
+          readOnly: true,
+        },
+      ],
+      activePath: path,
+      error: null,
+    }));
+  },
+
   setActive: (path: string) => {
     set({ activePath: path, error: null });
   },
@@ -207,6 +250,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       let closed = s.closedTabs;
       if (record) {
         for (const p of targets) {
+          // Read-only external files cannot be reopened with `openFile`, so
+          // they are never added to the closed-tab history.
+          if (openFiles.find((t) => t.path === p)?.readOnly) continue;
           closed = pushClosedTab(closed, p);
         }
       }
@@ -235,6 +281,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (!tracked) return false;
 
     const tab = get().openFiles.find((t) => t.path === target);
+    if (tab?.readOnly) return false;
     const content = tracked.model.getValue();
     try {
       if (tab?.external) {
@@ -368,6 +415,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const notices: string[] = [];
     for (const p of paths) {
       if (!get().openFiles.some((t) => t.path === p)) continue;
+      // Read-only external files are not workspace backed and the watcher only
+      // covers the workspace; nothing to refresh here.
+      if (get().openFiles.find((t) => t.path === p)?.readOnly) continue;
 
       if (modelStore.isDirty(p)) {
         notices.push(`${basename(p)} 已在磁盘上被修改，本地未保存的更改已保留`);

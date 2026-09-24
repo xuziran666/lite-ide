@@ -192,6 +192,47 @@ fn do_read_file(workspace: &Path, path: &str) -> Result<String, String> {
     })
 }
 
+/// Read a single file that lives outside the workspace (for example a
+/// rust-analyzer definition jump into the toolchain's standard library, or a
+/// source file whose absolute path was given explicitly).
+///
+/// This is the narrow end-user escape hatch from the workspace boundary: it
+/// only ever reads, never writes, and it validates the request strictly:
+/// - the path must be absolute;
+/// - it must not contain "." or ".." traversal components;
+/// - it is canonicalized (so a symlink must resolve to an existing file);
+/// - it must resolve to a regular file, not a directory.
+/// The caller decides whether a path is "external" by comparing it against the
+/// workspace; everything still inside the workspace goes through `read_file`.
+fn do_read_external_file(path: &str) -> Result<String, String> {
+    let requested = Path::new(path);
+    if !requested.is_absolute() {
+        return Err(format!("An absolute path is required: {path}"));
+    }
+    for component in requested.components() {
+        match component {
+            Component::ParentDir => {
+                return Err(format!("Unsafe path (parent traversal): {path}"));
+            }
+            Component::CurDir => {
+                return Err(format!("Unsafe path ('.' component): {path}"));
+            }
+            _ => {}
+        }
+    }
+
+    let file =
+        fs::canonicalize(requested).map_err(|e| io_error("resolve file", e))?;
+    if !file.is_file() {
+        return Err(format!("Not a file: {}", file.display()));
+    }
+
+    let bytes = fs::read(&file).map_err(|e| io_error("read file", e))?;
+    String::from_utf8(bytes).map_err(|_| {
+        format!("File is not valid UTF-8 and cannot be opened: {}", file.display())
+    })
+}
+
 fn do_write_file(workspace: &Path, path: &str, content: &str) -> Result<(), String> {
     let file = validate_within_workspace(workspace, Path::new(path))?;
     fs::write(&file, content.as_bytes()).map_err(|e| io_error("write file", e))
@@ -266,6 +307,14 @@ pub fn list_dir(path: String, state: State<'_, AppState>) -> Result<Vec<Entry>, 
 pub fn read_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
     let workspace = state.workspace()?.ok_or_else(no_workspace_error)?;
     do_read_file(&workspace, &path)
+}
+
+/// Read a single file outside the workspace (see `do_read_external_file` for
+/// the validation rules). Used for LSP definition jumps into files such as the
+/// rust standard library. Read-only: there is no matching write command.
+#[tauri::command]
+pub fn read_external_file(path: String) -> Result<String, String> {
+    do_read_external_file(&path)
 }
 
 #[tauri::command]
@@ -565,5 +614,44 @@ mod tests {
         assert!(!path_is_ignored(&ws.join("src").join("main.rs")));
         assert!(!path_is_ignored(&ws.join("inside.txt")));
         let _ = fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn read_external_requires_absolute_path() {
+        assert!(do_read_external_file("relative.txt").is_err());
+    }
+
+    #[test]
+    fn read_external_rejects_traversal_components() {
+        assert!(do_read_external_file("C:\\..\\secret.txt").is_err());
+        assert!(do_read_external_file("C:\\a\\.\\secret.txt").is_err());
+        assert!(do_read_external_file("/tmp/../secret.txt").is_err());
+    }
+
+    #[test]
+    fn read_external_reads_an_existing_file() {
+        let base = std::env::temp_dir().join(format!(
+            "lite_ide_ext_test_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("out.txt"), "hello").unwrap();
+        let canonical = fs::canonicalize(base.join("out.txt")).unwrap();
+        let target = canonical.to_string_lossy().into_owned();
+        assert_eq!(do_read_external_file(&target).unwrap(), "hello");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn read_external_rejects_directories_and_missing_files() {
+        let base = std::env::temp_dir().join(format!(
+            "lite_ide_ext_dir_test_{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let dir = fs::canonicalize(&base).unwrap();
+        assert!(do_read_external_file(&dir.to_string_lossy()).is_err());
+        assert!(do_read_external_file(&dir.join("missing.txt").to_string_lossy()).is_err());
+        let _ = fs::remove_dir_all(&base);
     }
 }

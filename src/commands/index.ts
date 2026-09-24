@@ -9,6 +9,16 @@ export function readFile(path: string): Promise<string> {
   return invoke<string>("read_file", { path });
 }
 
+/**
+ * Read a single file outside the workspace (e.g. a rust-analyzer definition
+ * jump into the standard library). Read-only — there is no write counterpart.
+ * Paths are validated on the backend: absolute, no "." or ".." components, and
+ * it must resolve to a regular file.
+ */
+export function readExternalFile(path: string): Promise<string> {
+  return invoke<string>("read_external_file", { path });
+}
+
 export function writeFile(path: string, content: string): Promise<void> {
   return invoke<void>("write_file", { path, content });
 }

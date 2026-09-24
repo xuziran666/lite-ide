@@ -24,6 +24,9 @@ export interface Tab {
   dirty: boolean;
   /** True for files outside the workspace (e.g. the global tasks.json). */
   external?: boolean;
+  /** True for files opened from outside the workspace (e.g. LSP definitions
+   *  into the standard library): never dirty, never saveable. */
+  readOnly?: boolean;
 }
 
 /** Cursor and selection state reported by the active Monaco editor. */
