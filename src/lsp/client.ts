@@ -697,6 +697,14 @@ export function runSignatureHelpAction(): void {
     ?.run();
 }
 
+/** Ctrl/Cmd+Y: delete the current line (or the selected lines) via Monaco. */
+export function runDeleteLineAction(): void {
+  void monaco.editor
+    .getEditors()[0]
+    ?.getAction("editor.action.deleteLines")
+    ?.run();
+}
+
 /** Shift+Alt+F: format the document, with a clear notice when unsupported. */
 export function runFormatDocumentAction(): void {
   const editor = monaco.editor.getEditors()[0];

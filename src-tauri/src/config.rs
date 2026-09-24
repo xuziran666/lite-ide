@@ -24,6 +24,7 @@ const KEYBINDING_DEFAULTS: &[(&str, &str)] = &[
     ("codeActions", "Ctrl+."),
     ("formatDocument", "Shift+Alt+F"),
     ("signatureHelp", "Ctrl+Shift+Space"),
+    ("deleteLine", "Ctrl+Y"),
 ];
 
 const USER_CONFIG_FILE: &str = "user.json";
@@ -505,7 +506,7 @@ mod tests {
     #[test]
     fn defaults_cover_every_action() {
         let map = defaults();
-        assert_eq!(map.len(), 15);
+        assert_eq!(map.len(), 16);
         assert_eq!(map.get("toggleExplorer").map(String::as_str), Some("Ctrl+B"));
         assert_eq!(
             map.get("openTaskCenter").map(String::as_str),
@@ -526,6 +527,7 @@ mod tests {
             map.get("formatDocument").map(String::as_str),
             Some("Shift+Alt+F")
         );
+        assert_eq!(map.get("deleteLine").map(String::as_str), Some("Ctrl+Y"));
     }
 
     #[test]
@@ -694,7 +696,7 @@ mod tests {
     fn empty_user_json_falls_back_with_notice() {
         let cfg = parse_user_config("");
         assert!(cfg.notice.is_some());
-        assert_eq!(cfg.keybindings.len(), 15);
+        assert_eq!(cfg.keybindings.len(), 16);
     }
 
     #[test]

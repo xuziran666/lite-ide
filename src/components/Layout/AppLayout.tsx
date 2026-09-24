@@ -26,6 +26,7 @@ import {
   editorHasTextFocus,
   findReferencesAtCursor,
   runCodeActionAction,
+  runDeleteLineAction,
   runFormatDocumentAction,
   runRenameAction,
   runSignatureHelpAction,
@@ -371,6 +372,12 @@ function AppLayout() {
         e.preventDefault();
         e.stopPropagation();
         runSignatureHelpAction();
+        return;
+      }
+      if (match("deleteLine")) {
+        e.preventDefault();
+        e.stopPropagation();
+        runDeleteLineAction();
       }
     };
     window.addEventListener("keydown", onKeyDownCapture, true);
