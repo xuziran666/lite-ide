@@ -443,7 +443,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           notices.push(`${basename(path)} 已在磁盘上被修改，本地未保存的更改已保留`);
           continue;
         }
-        modelStore.setModelContent(path, content);
+        // The app's own save (Auto Save / Ctrl+S) returns to us as a watcher
+        // event carrying the exact same content. Reloading that with setValue
+        // would reset the cursor/selection/scroll position, so only replace the
+        // model content when the file really changed on disk.
+        const model = modelStore.getModel(path);
+        if (model && model.getValue() !== content) {
+          modelStore.setModelContent(path, content);
+        }
         get().markDirty(path, false);
       } catch {
         // The file may have been deleted between the event and the read.
