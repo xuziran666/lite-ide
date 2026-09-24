@@ -2,55 +2,40 @@ import * as monaco from "monaco-editor";
 import { useEditorStore } from "../stores/editorStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { getModel } from "../editor/modelStore";
-
-/**
- * Case-insensitive, verbatim-prefix-tolerant key for comparing local paths:
- * backslashes become slashes, a Windows extended-length (`\\?\`) or UNC
- * (`\\?\UNC`) prefix is stripped, and the result is lowercased.
- */
-function pathKey(path: string): string {
-  let key = path.replace(/\\/g, "/");
-  const unc = key.match(/^\/\/\?\/?UNC\/(.*)$/i);
-  if (unc) {
-    key = "//" + unc[1];
-  } else if (key.startsWith("//?")) {
-    key = key.slice(4).replace(/^\/+/, "");
-  }
-  return key.toLowerCase();
-}
-
-/** Whether `path` lies inside the current workspace (or is the workspace). */
-function isPathInsideWorkspace(path: string): boolean {
-  const ws = useWorkspaceStore.getState().workspacePath;
-  if (!ws) return false;
-  const root = pathKey(ws);
-  const needle = pathKey(path);
-  return needle === root || needle.startsWith(root.endsWith("/") ? root : `${root}/`);
-}
+import {
+  canonicalPath,
+  isPathInsideWorkspace,
+  resolveAgainstWorkspace,
+} from "./pathIdentity";
 
 /**
  * Open a file and move the single Monaco editor to the given position (or just
  * bring it to the front when no line is given). Used by Quick Open, Global
- * Search, Problems, Outline and the LSP definition jump. A helper — not a
- * manager, just wires the existing editor store back to the editor instance.
+ * Search, Problems, Outline, the LSP definition jump and Find References.
  *
- * Files inside the workspace open through the normal `openFile` path; paths
- * outside it (e.g. a rust-analyzer definition in the standard library) open as
- * a read-only external tab.
+ * This is the single navigation entry point: it resolves workspace-relative
+ * input, canonicalizes the path, decides workspace-internal vs external, and
+ * delegates to the editor store — which guarantees exactly one tab and one
+ * Monaco model per canonical file, so a file opened here reuses whatever the
+ * file tree / another feature already opened.
  */
 export async function openAndReveal(
   path: string,
   line?: number,
   column?: number,
 ): Promise<void> {
-  if (isPathInsideWorkspace(path)) {
-    await useEditorStore.getState().openFile(path);
+  const workspace = useWorkspaceStore.getState().workspacePath;
+  const absolute = resolveAgainstWorkspace(path, workspace);
+  const target = canonicalPath(absolute);
+
+  if (isPathInsideWorkspace(target, workspace)) {
+    await useEditorStore.getState().openFile(target);
   } else {
-    await useEditorStore.getState().openExternalFile(path);
+    await useEditorStore.getState().openExternalFile(target);
   }
 
   const editor = monaco.editor.getEditors()[0];
-  const model = getModel(path);
+  const model = getModel(target);
   if (!editor || !model) return;
 
   if (editor.getModel() !== model) {

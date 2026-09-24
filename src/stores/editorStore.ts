@@ -11,6 +11,7 @@ import {
 import * as modelStore from "../editor/modelStore";
 import { useConfigStore } from "./configStore";
 import { basename, dirname, joinPath, languageForPath } from "../utils/language";
+import { canonicalPath, sameFile } from "../utils/pathIdentity";
 
 /**
  * Tabs being closed in a batch (close others / close right / close all).
@@ -89,39 +90,42 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   cursor: null,
 
   openFile: async (path: string) => {
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const target = canonicalPath(path);
+    const existing = get().openFiles.find((t) => sameFile(t.path, target));
+    if (existing) {
+      set({ activePath: existing.path, error: null });
       return;
     }
 
     let content: string;
     try {
-      content = await readFile(path);
+      content = await readFile(target);
     } catch (e) {
       set({ error: String(e) });
       return;
     }
 
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const raced = get().openFiles.find((t) => sameFile(t.path, target));
+    if (raced) {
+      set({ activePath: raced.path, error: null });
       return;
     }
 
-    modelStore.createModel(path, content, (dirty) => {
-      get().markDirty(path, dirty);
+    modelStore.createModel(target, content, (dirty) => {
+      get().markDirty(target, dirty);
     });
 
     set((s) => ({
       openFiles: [
         ...s.openFiles,
         {
-          path,
-          name: basename(path),
-          language: languageForPath(path),
+          path: target,
+          name: basename(target),
+          language: languageForPath(target),
           dirty: false,
         },
       ],
-      activePath: path,
+      activePath: target,
       error: null,
     }));
   },
@@ -135,9 +139,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       set({ error: "无法解析配置目录" });
       return;
     }
-    const path = joinPath(dir, name);
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const path = canonicalPath(joinPath(dir, name));
+    const existing = get().openFiles.find((t) => sameFile(t.path, path));
+    if (existing) {
+      set({ activePath: existing.path, error: null });
       return;
     }
 
@@ -149,8 +154,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return;
     }
 
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const raced = get().openFiles.find((t) => sameFile(t.path, path));
+    if (raced) {
+      set({ activePath: raced.path, error: null });
       return;
     }
 
@@ -175,40 +181,43 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   openExternalFile: async (path: string) => {
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const target = canonicalPath(path);
+    const existing = get().openFiles.find((t) => sameFile(t.path, target));
+    if (existing) {
+      set({ activePath: existing.path, error: null });
       return;
     }
 
     let content: string;
     try {
-      content = await readExternalFile(path);
+      content = await readExternalFile(target);
     } catch (e) {
       set({ error: String(e) });
       return;
     }
 
-    if (get().openFiles.some((t) => t.path === path)) {
-      set({ activePath: path, error: null });
+    const raced = get().openFiles.find((t) => sameFile(t.path, target));
+    if (raced) {
+      set({ activePath: raced.path, error: null });
       return;
     }
 
     // Read-only: never mark the tab dirty no matter what is typed, so closing
     // it never asks to save.
-    modelStore.createModel(path, content, () => {});
+    modelStore.createModel(target, content, () => {});
 
     set((s) => ({
       openFiles: [
         ...s.openFiles,
         {
-          path,
-          name: basename(path),
-          language: languageForPath(path),
+          path: target,
+          name: basename(target),
+          language: languageForPath(target),
           dirty: false,
           readOnly: true,
         },
       ],
-      activePath: path,
+      activePath: target,
       error: null,
     }));
   },
@@ -382,56 +391,60 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   applyRename: (path: string, newPath: string) => {
-    const { openFiles } = get();
-    if (!openFiles.some((t) => t.path === path)) return;
+    const tab = get().openFiles.find((t) => sameFile(t.path, path));
+    if (!tab) return;
 
-    const dirty = modelStore.isDirty(path);
-    modelStore.rekeyPath(path, newPath, (d) => get().markDirty(newPath, d));
+    const oldPath = tab.path;
+    const target = canonicalPath(newPath);
+    const dirty = modelStore.isDirty(oldPath);
+    modelStore.rekeyPath(oldPath, target, (d) => get().markDirty(target, d));
 
     set((s) => ({
       openFiles: s.openFiles.map((t) =>
-        t.path === path
+        t.path === oldPath
           ? {
-              path: newPath,
-              name: basename(newPath),
-              language: languageForPath(newPath),
+              path: target,
+              name: basename(target),
+              language: languageForPath(target),
               dirty,
             }
           : t,
       ),
-      activePath: s.activePath === path ? newPath : s.activePath,
+      activePath: sameFile(s.activePath ?? "", oldPath) ? target : s.activePath,
     }));
   },
 
   applyDelete: (path: string) => {
-    const tab = get().openFiles.find((t) => t.path === path);
+    const tab = get().openFiles.find((t) => sameFile(t.path, path));
     if (!tab) return;
     if (tab.dirty) return;
     // A deleted file cannot be reopened, so don't add it to the history.
-    get().closeTab(path, false);
+    get().closeTab(tab.path, false);
   },
 
   onExternalChange: async (paths: string[]) => {
     const notices: string[] = [];
-    for (const p of paths) {
-      if (!get().openFiles.some((t) => t.path === p)) continue;
+    for (const eventPath of paths) {
+      const tab = get().openFiles.find((t) => sameFile(t.path, eventPath));
+      if (!tab) continue;
       // Read-only external files are not workspace backed and the watcher only
       // covers the workspace; nothing to refresh here.
-      if (get().openFiles.find((t) => t.path === p)?.readOnly) continue;
+      if (tab.readOnly) continue;
 
-      if (modelStore.isDirty(p)) {
-        notices.push(`${basename(p)} 已在磁盘上被修改，本地未保存的更改已保留`);
+      const path = tab.path;
+      if (modelStore.isDirty(path)) {
+        notices.push(`${basename(path)} 已在磁盘上被修改，本地未保存的更改已保留`);
         continue;
       }
 
       try {
-        const content = await readFile(p);
-        if (modelStore.isDirty(p)) {
-          notices.push(`${basename(p)} 已在磁盘上被修改，本地未保存的更改已保留`);
+        const content = await readFile(path);
+        if (modelStore.isDirty(path)) {
+          notices.push(`${basename(path)} 已在磁盘上被修改，本地未保存的更改已保留`);
           continue;
         }
-        modelStore.setModelContent(p, content);
-        get().markDirty(p, false);
+        modelStore.setModelContent(path, content);
+        get().markDirty(path, false);
       } catch {
         // The file may have been deleted between the event and the read.
       }
@@ -532,7 +545,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
       // Never duplicate an already open tab; just activate it.
       const alreadyOpen = closedTabs.find((p) =>
-        openFiles.some((t) => t.path === p),
+        openFiles.some((t) => sameFile(t.path, p)),
       );
       if (alreadyOpen) {
         set({
@@ -549,7 +562,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       let exists = false;
       try {
         const entries = await listDir(dirname(path));
-        exists = entries.some((e) => e.path === path && !e.is_dir);
+        exists = entries.some((e) => sameFile(e.path, path) && !e.is_dir);
       } catch {
         exists = false;
       }

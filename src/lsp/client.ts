@@ -9,6 +9,7 @@ import {
   readExternalFile,
 } from "../commands";
 import { languageForPath } from "../utils/language";
+import { canonicalPath, fileKey, isPathInsideWorkspace } from "../utils/pathIdentity";
 import {
   pathToFileUri,
   fileUriToPath,
@@ -96,16 +97,11 @@ export function serverSupports(languageId: string, capability: string): boolean 
   return Boolean(capabilities[capability]);
 }
 
-/** Non-ASCII-safe normalization of a workspace-backed model key:
- *  strips a Windows extended-length (`\\?\`, seen as `//?/`) prefix so open
- *  model keys match the clean paths LSP servers report back. Monaco may also
- *  emit the authority without the trailing slash (`file://%3FUNC/...`). */
+/** Non-ASCII-safe canonical key for a workspace-backed model path. Delegates to
+ *  the shared file identity so tree paths, LSP URIs and relative paths all
+ *  collapse to the same key (see `utils/pathIdentity.ts`). */
 function normalizePathKey(path: string): string {
-  const forward = path.replace(/\\/g, "/");
-  const unc = forward.match(/^\/\/\?\/?UNC\/(.*)$/i);
-  if (unc) return "//" + unc[1];
-  if (forward.startsWith("//?")) return forward.slice(4).replace(/^\/+/, "");
-  return path;
+  return canonicalPath(path);
 }
 
 /** The model-store-style path key for a model, derived from its URI. */
@@ -120,47 +116,32 @@ function uriFor(model: monaco.editor.ITextModel): string {
 }
 
 export function findOpenModel(path: string): monaco.editor.ITextModel | undefined {
-  const needle = normalizePathKey(path).toLowerCase();
+  const needle = fileKey(path);
   for (const { model } of docs.values()) {
-    if (normalizePathKey(modelPath(model)).toLowerCase() === needle) {
+    if (fileKey(modelPath(model)) === needle) {
       return model;
     }
   }
   return monaco.editor
     .getModels()
-    .find(
-      (m) =>
-        languageForModel(m) !== undefined &&
-        normalizePathKey(modelPath(m)).toLowerCase() === needle,
-    );
+    .find((m) => languageForModel(m) !== undefined && fileKey(modelPath(m)) === needle);
 }
 
 /**
  * Windows path matching is case-insensitive (LSP servers normalize the drive
- * letter to lowercase, opened models keep the original case). Return a path
- * that matches an already-open model so we never create a second tab for the
- * same physical file.
+ * letter to lowercase, opened models keep the original case). Return the
+ * canonical path of an already-open model so we never create a second tab for
+ * the same physical file.
  */
 export function matchOpenModelCase(path: string): string {
   const model = findOpenModel(path);
-  if (!model) return path;
-  const existing = modelPath(model);
-  return normalizePathKey(existing).toLowerCase() === path.toLowerCase()
-    ? normalizePathKey(existing)
-    : path;
+  if (!model) return normalizePathKey(path);
+  return normalizePathKey(modelPath(model));
 }
 
-/** Whether a path belongs to the currently opened workspace. Windows paths are
- *  compared case-insensitively and normalized for separators and a verbatim
- *  (`\\?\`) / UNC prefix, mirroring the reveal helper used for navigation. */
+/** Whether a path belongs to the currently opened workspace. */
 export function isInsideWorkspace(path: string): boolean {
-  const ws = useWorkspaceStore.getState().workspacePath;
-  if (!ws) return false;
-  const key = (p: string) =>
-    normalizePathKey(p).replace(/\\/g, "/").toLowerCase();
-  const needle = key(path);
-  const root = key(ws).replace(/\/+$/, "");
-  return needle === root || needle.startsWith(root + "/");
+  return isPathInsideWorkspace(path, useWorkspaceStore.getState().workspacePath);
 }
 
 /**

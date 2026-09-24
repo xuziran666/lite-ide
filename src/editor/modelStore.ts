@@ -1,8 +1,11 @@
 import * as monaco from "monaco-editor";
 import "./monacoSetup";
 import { languageForPath } from "../utils/language";
+import { canonicalPath, fileKey } from "../utils/pathIdentity";
 
 interface Tracked {
+  /** Canonical (case-preserving) path, used for the Monaco URI and display. */
+  path: string;
   model: monaco.editor.ITextModel;
   savedVersion: number;
   suppressChange: boolean;
@@ -10,30 +13,37 @@ interface Tracked {
 
 const tracked = new Map<string, Tracked>();
 
+/** Models are keyed by the case-insensitive canonical identity (so the same
+ *  physical file can never own two models) while their URI is built from the
+ *  case-preserving canonical path. */
 function norm(path: string): string {
-  return path.replace(/\\/g, "/");
+  return canonicalPath(path);
+}
+
+function key(path: string): string {
+  return fileKey(path);
 }
 
 export function getModel(path: string): monaco.editor.ITextModel | undefined {
-  return tracked.get(norm(path))?.model;
+  return tracked.get(key(path))?.model;
 }
 
-/** Reverse lookup: the normalized path owning a live model, if any. */
+/** Reverse lookup: the canonical path owning a live model, if any. */
 export function pathForModel(
   model: monaco.editor.ITextModel,
 ): string | undefined {
-  for (const [key, entry] of tracked) {
-    if (entry.model === model) return key;
+  for (const entry of tracked.values()) {
+    if (entry.model === model) return entry.path;
   }
   return undefined;
 }
 
 export function getTracked(path: string): Tracked | undefined {
-  return tracked.get(norm(path));
+  return tracked.get(key(path));
 }
 
 export function isDirty(path: string): boolean {
-  const entry = tracked.get(norm(path));
+  const entry = tracked.get(key(path));
   return (
     !!entry &&
     !entry.model.isDisposed() &&
@@ -46,13 +56,14 @@ export function createModel(
   content: string,
   onChange: (dirty: boolean) => void,
 ): monaco.editor.ITextModel {
-  const key = norm(path);
-  const existing = tracked.get(key);
+  const canonical = norm(path);
+  const mapKey = key(path);
+  const existing = tracked.get(mapKey);
   if (existing) {
     return existing.model;
   }
 
-  const uri = monaco.Uri.file(key);
+  const uri = monaco.Uri.file(canonical);
   const prior = monaco.editor.getModel(uri);
   if (prior) {
     prior.dispose();
@@ -60,16 +71,17 @@ export function createModel(
 
   const model = monaco.editor.createModel(
     content,
-    languageForPath(key),
+    languageForPath(canonical),
     uri,
   );
 
   const entry: Tracked = {
+    path: canonical,
     model,
     savedVersion: model.getVersionId(),
     suppressChange: false,
   };
-  tracked.set(key, entry);
+  tracked.set(mapKey, entry);
 
   const listener = model.onDidChangeContent(() => {
     if (entry.suppressChange || model.isDisposed()) {
@@ -80,14 +92,14 @@ export function createModel(
 
   model.onWillDispose(() => {
     listener.dispose();
-    tracked.delete(key);
+    tracked.delete(mapKey);
   });
 
   return model;
 }
 
 export function markSaved(path: string) {
-  const entry = tracked.get(norm(path));
+  const entry = tracked.get(key(path));
   if (entry && !entry.model.isDisposed()) {
     entry.savedVersion = entry.model.getVersionId();
   }
@@ -95,7 +107,7 @@ export function markSaved(path: string) {
 
 /** Reload a model's content from disk without marking it dirty. */
 export function setModelContent(path: string, content: string) {
-  const entry = tracked.get(norm(path));
+  const entry = tracked.get(key(path));
   if (!entry || entry.model.isDisposed()) return;
   entry.suppressChange = true;
   entry.model.setValue(content);
@@ -109,17 +121,17 @@ export function rekeyPath(
   newPath: string,
   onChange: (dirty: boolean) => void,
 ) {
-  const key = norm(path);
-  const entry = tracked.get(key);
+  const oldKey = key(path);
+  const entry = tracked.get(oldKey);
   if (!entry || entry.model.isDisposed()) return;
-  const newKey = norm(newPath);
-  if (key === newKey) return;
+  const newKey = key(newPath);
+  if (oldKey === newKey) return;
 
   const content = entry.model.getValue();
   const dirty = entry.model.getVersionId() !== entry.savedVersion;
 
   entry.model.dispose();
-  tracked.delete(key);
+  tracked.delete(oldKey);
 
   createModel(newPath, content, onChange);
   const newEntry = tracked.get(newKey);
@@ -129,9 +141,10 @@ export function rekeyPath(
 }
 
 export function disposeModel(path: string) {
-  const entry = tracked.get(norm(path));
+  const mapKey = key(path);
+  const entry = tracked.get(mapKey);
   if (entry && !entry.model.isDisposed()) {
     entry.model.dispose();
   }
-  tracked.delete(norm(path));
+  tracked.delete(mapKey);
 }

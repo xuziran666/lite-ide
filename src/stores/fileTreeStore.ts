@@ -8,6 +8,12 @@ import {
   renameEntry as renameEntryCommand,
 } from "../commands";
 import { basename, dirname, joinPath } from "../utils/language";
+import {
+  canonicalPath,
+  fileKey,
+  isPathInsideWorkspace,
+  resolveAgainstWorkspace,
+} from "../utils/pathIdentity";
 import { useEditorStore } from "./editorStore";
 
 // Directories that are never auto-expanded when revealing the active file,
@@ -206,26 +212,34 @@ export const useFileTreeStore = create<FileTreeStore>((set, get) => ({
   // Select `path` in the tree, expanding and lazily loading its ancestors so a
   // file opened from a tab becomes visible. Whether the tree itself is collapsed
   // is left untouched.
+  //
+  // `path` may be a canonical path (tab / LSP / relative) while the tree stores
+  // the backend's own representation, so the identity comparison is canonical
+  // and the ancestors are rebuilt from the root's real path.
   revealPath: async (path: string) => {
     const root = get().root;
-    if (!root || path === root.path || !path.startsWith(root.path)) return;
+    if (!root) return;
 
-    set({ selectedPath: path });
-    if (findNode(root, path)) return;
+    const absolute = resolveAgainstWorkspace(path, root.path);
+    if (!isPathInsideWorkspace(absolute, root.path)) return;
+    if (fileKey(absolute) === fileKey(root.path)) return;
 
-    const segments = path
-      .slice(root.path.length)
-      .split(/[\\/]/)
+    const canonRoot = canonicalPath(root.path).replace(/\/+$/, "");
+    const rel = canonicalPath(absolute)
+      .slice(canonRoot.length)
+      .replace(/^\/+/, "")
+      .split("/")
       .filter(Boolean);
-    segments.pop();
+    if (rel.length === 0) return;
+    const fileName = rel.pop() as string;
 
     // Opening e.g. node_modules/pkg/dist/index.js must not unfold the whole
     // dependency chain; the tab still opens and the file gets highlighted once
     // its parent directory is expanded by hand.
-    if (segments.some((segment) => AUTO_REVEAL_SKIP.includes(segment))) return;
+    if (rel.some((segment) => AUTO_REVEAL_SKIP.includes(segment))) return;
 
     let current = root.path;
-    for (const segment of segments) {
+    for (const segment of rel) {
       current = joinPath(current, segment);
       const tree = get().root;
       if (!tree) return;
@@ -237,6 +251,7 @@ export const useFileTreeStore = create<FileTreeStore>((set, get) => ({
         await get().loadChildren(current);
       }
     }
+    set({ selectedPath: joinPath(current, fileName) });
   },
 
   createFile: async (parent: string, name: string) => {
