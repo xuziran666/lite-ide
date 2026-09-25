@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import FileTree from "../FileTree/FileTree";
+import SourceControlPanel from "../SourceControl/SourceControlPanel";
+import TasksPanel from "../Tasks/TasksPanel";
 import Tabs from "../Editor/Tabs";
 import Editor from "../Editor/Editor";
+import DiffView from "../DiffView/DiffView";
 import TerminalPane from "../Terminal/Terminal";
 import TopBar from "./TopBar";
 import ActivityBar from "./ActivityBar";
@@ -22,6 +25,8 @@ import { useTerminalStore } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useSearchStore } from "../../stores/searchStore";
 import { useConfigStore } from "../../stores/configStore";
+import { useGitStore } from "../../stores/gitStore";
+import { useDiffStore } from "../../stores/diffStore";
 import {
   editorHasTextFocus,
   findReferencesAtCursor,
@@ -88,7 +93,6 @@ function AppLayout() {
   const [terminalHeight, setTerminalHeight] = useState(() =>
     clamp(DEFAULT_TERMINAL_HEIGHT, MIN_TERMINAL_HEIGHT, terminalMaxHeight()),
   );
-  const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [terminalCollapsed, setTerminalCollapsed] = useState(true);
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     clamp(
@@ -102,10 +106,12 @@ function AppLayout() {
 
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const activePath = useEditorStore((s) => s.activePath);
+  const diffOpen = useDiffStore((s) => s.diff !== null);
   const taskRunSeq = useTaskStore((s) => s.taskRunSeq);
   const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
   const settingsOpen = useConfigStore((s) => s.settingsOpen);
   const rightSidebarOpen = useSearchStore((s) => s.rightSidebarOpen);
+  const activePrimarySidebar = useSearchStore((s) => s.activePrimarySidebar);
 
   // File system events drive both the tree refresh and the editor handling of
   // files that changed outside the app.
@@ -117,6 +123,7 @@ function AppLayout() {
       if (paths.length === 0) return;
       void useFileTreeStore.getState().onFileSystemChanged(paths);
       void useEditorStore.getState().onExternalChange(paths);
+      useGitStore.getState().scheduleRefresh();
     }).then((fn) => {
       if (cancelled) {
         fn();
@@ -270,8 +277,8 @@ function AppLayout() {
 
       if (match("toggleExplorer")) {
         e.preventDefault();
-        // Toggle the Explorer panel only; the Activity Bar stays visible.
-        setExplorerCollapsed((value) => !value);
+        // Toggle the primary sidebar; the Activity Bar stays visible.
+        useSearchStore.getState().selectPrimarySidebar("explorer");
         return;
       }
       if (match("toggleTerminal")) {
@@ -401,12 +408,12 @@ function AppLayout() {
     );
   }, []);
 
-  const collapseExplorer = useCallback(() => setExplorerCollapsed(true), []);
-  const expandExplorer = useCallback(() => setExplorerCollapsed(false), []);
-  const toggleExplorer = useCallback(
-    () => setExplorerCollapsed((value) => !value),
-    [],
-  );
+  const collapseExplorer = useCallback(() => {
+    useSearchStore.getState().selectPrimarySidebar("explorer");
+  }, []);
+  const expandExplorer = useCallback(() => {
+    useSearchStore.getState().selectPrimarySidebar("explorer");
+  }, []);
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
   const toggleRightSidebar = useCallback(
@@ -433,28 +440,53 @@ function AppLayout() {
           onToggleSecondarySidebar={toggleRightSidebar}
         />
 <div className="app-body">
-          <ActivityBar
-            explorerVisible={!explorerCollapsed}
-            onToggleExplorer={toggleExplorer}
-          />
+          <ActivityBar />
           <div
             className={settingsOpen ? "app-center settings-mode" : "app-center"}
           >
             <div className="workbench">
-              {!explorerCollapsed && (
+              {activePrimarySidebar !== null && (
                 <>
                   <div className="file-tree-wrap" style={{ width: fileTreeWidth }}>
-                    <FileTree onCollapse={collapseExplorer} />
+                    <div
+                      className={
+                        activePrimarySidebar === "explorer"
+                          ? "primary-sidebar-view"
+                          : "primary-sidebar-view hidden"
+                      }
+                    >
+                      <FileTree onCollapse={collapseExplorer} />
+                    </div>
+                    <div
+                      className={
+                        activePrimarySidebar === "sourceControl"
+                          ? "primary-sidebar-view"
+                          : "primary-sidebar-view hidden"
+                      }
+                    >
+                      <SourceControlPanel />
+                    </div>
+                    <div
+                      className={
+                        activePrimarySidebar === "tasks"
+                          ? "primary-sidebar-view"
+                          : "primary-sidebar-view hidden"
+                      }
+                    >
+                      <TasksPanel />
+                    </div>
                   </div>
                   <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
                 </>
               )}
               <div
                 className={
-                  explorerCollapsed ? "main-area file-tree-collapsed" : "main-area"
+                  activePrimarySidebar === null
+                    ? "main-area file-tree-collapsed"
+                    : "main-area"
                 }
               >
-                {explorerCollapsed && (
+                {activePrimarySidebar === null && (
                   <button
                     type="button"
                     className="rail-expand-btn floating"
@@ -465,7 +497,10 @@ function AppLayout() {
                   </button>
                 )}
                 <Tabs />
-                <Editor />
+                <div className="editor-stack">
+                  <Editor />
+                  {diffOpen && <DiffView />}
+                </div>
               </div>
             </div>
             {/* Settings overlays the editor while the workbench stays mounted

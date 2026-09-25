@@ -1,6 +1,6 @@
 # lite-ide
 
-基于 Tauri v2 的轻量级跨平台代码编辑器，核心功能为：文件树、代码编辑器（Monaco）、内置终端（xterm.js + portable-pty）、任务与设置系统，以及项目导航（Quick Open / 全局搜索 / 大纲 / 问题）与内置 LSP 客户端（Rust / C / C++ / TypeScript / JavaScript）。
+基于 Tauri v2 的轻量级跨平台代码编辑器，核心功能为：文件树、代码编辑器（Monaco）、内置终端（xterm.js + portable-pty）、任务与设置系统、项目导航（Quick Open / 全局搜索 / 大纲 / 问题）与内置 LSP 客户端（Rust / C / C++ / TypeScript / JavaScript），以及基于系统 Git CLI 的源代码管理（Phase 2 暂存/取消暂存/文件 Diff/提交 + Phase 3.1 提交历史/提交文件树/提交 Diff）。
 
 ## 环境要求
 
@@ -11,6 +11,7 @@
   - Rust：`rust-analyzer`
   - C/C++：`clangd`
   - TypeScript/JavaScript：`typescript-language-server --stdio`
+- Git 命令行（从 PATH 查找，仅源代码管理面板使用；未安装时面板显示错误，不影响其它功能）
 
 ## 开发
 
@@ -58,6 +59,8 @@ pnpm build         # TypeScript 检查 + Vite 构建
 - 阶段 14：编辑器设置 —— Settings → 编辑器新增 **字体**（字体族 / 连字）、**显示**（行号 / 空白字符 / 当前行高亮 / 缩进参考线 / 代码折叠 / 括号匹配 / 括号对着色 / 平滑滚动 / 光标样式 / 光标闪烁）、**编辑**（粘贴时格式化 / 输入时格式化 / 自动闭合括号 / 自动闭合引号 / 自动包裹 / 去除自动空白 / 拖放文本 / 复制时保留语法高亮）三组共 20 项 Monaco 原生配置，与既有的字号 / 制表符大小 / 自动换行 / 缩略图 / `Ctrl+滚轮` 缩放 / 配色主题一起构成完整的编辑器设置；全部写入 `user.json` 的 `editor` 节（含嵌套 `guides.indentation` 与 `bracketPairColorization.enabled`）；Rust 侧枚举白名单校验非法值、空字体族回退默认，旧 `user.json` 缺字段自动补默认；热应用**按字段**下发（仅 `editor.theme` 变化才 `setTheme`）。
 - 资源管理器「打开文件」入口 —— 系统文件选择器；工作区内文件按普通可写标签打开，工作区外文件按只读外部标签打开；复用 path identity（`isPathInsideWorkspace` / `sameFile`）去重，已打开则激活、不产生重复标签。
 - 工程化 —— GitHub Actions：CI（前端 `tsc + vite build` 与 Rust `cargo check`）与 Release（多平台 `tauri-action`，`v*` 标签触发）。
+- 阶段 15：源代码管理（Git Phase 2）—— 基于系统 Git CLI（`rev-parse --show-toplevel` 仓库检测、`status --short --untracked-files=all` 状态读取、`add --` / `restore --staged --` 暂存与取消暂存、`show HEAD:<path>`/`show :0:<path>` 两侧 blob 读取、`commit -m` 提交）、活动栏「源代码管理」入口与右侧栏「源代码」标签、更改 / 已暂存更改 两组列表与 M/A/D/R/U/? 状态徽标、单文件与全部暂存 / 取消暂存、点击行打开只读 Monaco Diff（HEAD / 索引 / 工作区 / 空 任意两侧，删除文件与二进制检测友好）、底部提交框（`Ctrl/Cmd+Enter` 提交，空白消息/无暂存更改禁用，失败显示 stderr 原文）、文件监听 400ms 防抖自动刷新、工作区切换清理与竞态保护、git 未安装/非仓库错误提示。分支、推送、冲突解决等留待后续阶段。
+- 阶段 15.1：源代码管理（Git Phase 3.1）——「更改 / 历史」视图切换；提交历史列表（`git log -n/--skip` 分页，每页 50，短哈希/说明/作者/相对时间，空仓库与合并提交友好）；提交详情与变更清单（`git show -M --name-status -z`，`%P` 取首父，按 `R100\0旧\0新` 解析重命名）；**IDEA 风格工作区相对目录树**（每层目录在前、文件在后、大小写不敏感字母序，目录默认展开）；点击文件复用既有只读 Diff 浮层做 **Parent → Commit 单文件对比**（`DiffSideRequest` 新增 `commit`/`label`，前端纯函数 `commitDiffSides` 映射 M/A/D/R/C，标签为 `短哈希:path`）；`safe_commit_ref` 校验任意修订引用、blob 缺失降级为空；新增 Tauri 命令 `git_log` / `git_commit_details`；进视图自动加载、刷新按钮联动重载、工作区切换清理与竞态保护。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
 

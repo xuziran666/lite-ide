@@ -278,6 +278,148 @@ export function searchWorkspace(
   });
 }
 
+/** One changed file from the Source Control panel. */
+export interface GitFileStatus {
+  /** Workspace-relative path, always using `/` separators. */
+  path: string;
+  /** The most significant status letter: M / A / D / R / C / U / ?. */
+  status: string;
+  /** The change is staged in the index. */
+  staged: boolean;
+  /** The worktree differs from the index, or the file is untracked. */
+  unstaged: boolean;
+  /** The file is untracked (`??`). */
+  untracked: boolean;
+  /** Old path for rename/copy entries, otherwise null. */
+  renamedFrom: string | null;
+  /** Raw porcelain column 1 (`" "` when unmodified). */
+  stagedStatus: string;
+  /** Raw porcelain column 2 (`" "` when unmodified). */
+  unstagedStatus: string;
+}
+
+/** The `git_status` snapshot for the current workspace. */
+export interface GitSnapshot {
+  /** Absolute repository root, or null when the workspace is not in a repo. */
+  repositoryRoot: string | null;
+  files: GitFileStatus[];
+}
+
+/** Detect the repository root for the workspace; null when not a Git repo. */
+export function gitDetectRepository(): Promise<string | null> {
+  return invoke<string | null>("git_detect_repository");
+}
+
+/** The Source Control snapshot (repository root + every changed file). */
+export function gitStatus(): Promise<GitSnapshot> {
+  return invoke<GitSnapshot>("git_status");
+}
+
+/** Stage the given workspace-relative paths. */
+export function gitStage(paths: string[]): Promise<void> {
+  return invoke<void>("git_stage", { paths });
+}
+
+/** Unstage the given workspace-relative paths. */
+export function gitUnstage(paths: string[]): Promise<void> {
+  return invoke<void>("git_unstage", { paths });
+}
+
+/** Stage every change in the workspace (added, modified and deleted). */
+export function gitStageAll(): Promise<void> {
+  return invoke<void>("git_stage_all");
+}
+
+/** Unstage every staged change in the workspace. */
+export function gitUnstageAll(): Promise<void> {
+  return invoke<void>("git_unstage_all");
+}
+
+/** The source of one side of a Git diff (which revision's blob to fetch). */
+export type DiffSource = "HEAD" | "INDEX" | "WORKTREE" | "COMMIT" | "EMPTY";
+
+/** One side of a Git diff fetch. `source` selects the blob: "HEAD" (last
+ *  commit), "INDEX" (staging area), "WORKTREE" (disk), "COMMIT" (an arbitrary
+ *  revision via its `commit` hash, defaulting to "HEAD") or "EMPTY" (no
+ *  content, for a newly added or deleted side). `path` is the git-relative
+ *  path to read (the pre-rename path on the original side of a rename).
+ *  An optional `label` overrides the derived header label so the History panel
+ *  can show short hashes like `a1b2c3d^: src/main.cpp`. */
+export interface DiffSideRequest {
+  source: DiffSource;
+  path: string;
+  commit?: string;
+  label?: string;
+}
+
+/** Plain-text content of a temporary Git diff for the Monaco diff editor. */
+export interface GitDiffContent {
+  original: string;
+  modified: string;
+  originalLabel: string;
+  modifiedLabel: string;
+  /** Either side is a binary blob; the UI renders a message instead. */
+  binary: boolean;
+}
+
+/** Fetch the two sides of a file diff from the repository. */
+export function gitDiffFile(
+  original: DiffSideRequest,
+  modified: DiffSideRequest,
+): Promise<GitDiffContent> {
+  return invoke<GitDiffContent>("git_diff_file", { original, modified });
+}
+
+/** Commit the currently staged changes with the given message. */
+export function gitCommit(message: string): Promise<void> {
+  return invoke<void>("git_commit", { message });
+}
+
+/** One commit in the repository's history, newest first. */
+export interface GitCommitInfo {
+  /** Full 40-char SHA-1. */
+  hash: string;
+  /** First 7 characters of the hash. */
+  shortHash: string;
+  /** Subject line only. */
+  message: string;
+  author: string;
+  email: string | null;
+  /** Unix epoch seconds of the author date. */
+  date: number;
+}
+
+/** One changed file inside a commit. */
+export interface GitCommitFile {
+  /** Workspace-relative path, always using `/` separators. */
+  path: string;
+  /** M / A / D / R / C, or "?" when the status is unknown. */
+  status: string;
+  /** Old path for rename/copy entries, otherwise null. */
+  oldPath: string | null;
+}
+
+/** One commit's details: metadata, first parent and changed files. */
+export interface GitCommitDetails {
+  parentHash: string | null;
+  commit: GitCommitInfo;
+  files: GitCommitFile[];
+}
+
+/** The repository's commit history, newest first, paged by `limit`/`skip`.
+ *  The caller infers "there are more" from a page that is exactly `limit`
+ *  long. An empty repository resolves to an empty list. */
+export function gitLog(limit: number, skip: number): Promise<GitCommitInfo[]> {
+  return invoke<GitCommitInfo[]>("git_log", { limit, skip });
+}
+
+/** One commit's details (first parent + changed files). */
+export function gitCommitDetails(
+  commit: string,
+): Promise<GitCommitDetails> {
+  return invoke<GitCommitDetails>("git_commit_details", { commit });
+}
+
 export interface LspStartResult {
   alreadyRunning: boolean;
   rootUri: string | null;

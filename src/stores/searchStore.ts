@@ -4,6 +4,9 @@ import { useWorkspaceStore } from "./workspaceStore";
 
 export type RightSidebarTab = "search" | "references" | "outline" | "problems";
 
+/** Active view of the left primary sidebar; null means fully collapsed. */
+export type PrimarySidebarView = "explorer" | "sourceControl" | "tasks";
+
 /** One `textDocument/references` result row. */
 export interface ReferenceItem {
   path: string;
@@ -25,7 +28,9 @@ interface SearchStore {
   /** Right (secondary) sidebar visibility and active panel. */
   rightSidebarOpen: boolean;
   rightSidebarTab: RightSidebarTab;
-  /** Find References results; null until a search has run for the symbol. */
+  /** Left (primary) sidebar active view, or null when it is collapsed. */
+  activePrimarySidebar: PrimarySidebarView | null;
+  /** References results; null until a search has run for the symbol. */
   references: ReferenceItem[] | null;
   referencesSymbol: string | null;
   referencesLoading: boolean;
@@ -38,6 +43,7 @@ interface SearchStore {
   openRightSidebar: (tab: RightSidebarTab) => void;
   toggleRightSidebar: () => void;
   closeRightSidebar: () => void;
+  selectPrimarySidebar: (tab: PrimarySidebarView) => void;
   beginReferences: (symbol: string) => void;
   finishReferences: (items: ReferenceItem[]) => void;
   clearReferences: () => void;
@@ -50,6 +56,7 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   quickOpenOpen: false,
   rightSidebarOpen: false,
   rightSidebarTab: "outline",
+  activePrimarySidebar: "explorer",
   references: null,
   referencesSymbol: null,
   referencesLoading: false,
@@ -85,6 +92,13 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   toggleRightSidebar: () =>
     set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
   closeRightSidebar: () => set({ rightSidebarOpen: false }),
+
+  // VS Code semantics: clicking the already-active Activity Bar icon collapses
+  // the primary sidebar; clicking any other icon switches the view.
+  selectPrimarySidebar: (tab) =>
+    set((s) => ({
+      activePrimarySidebar: s.activePrimarySidebar === tab ? null : tab,
+    })),
 
   beginReferences: (symbol) =>
     set({

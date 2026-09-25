@@ -548,9 +548,44 @@ body,
 }
 
 .file-name {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tree-git-status {
+  flex: none;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.tree-git-m {
+  color: var(--vo-color-c09553);
+}
+
+.tree-git-a {
+  color: var(--vo-color-3fb950);
+}
+
+.tree-git-d {
+  color: var(--vo-color-f14c4c);
+}
+
+.tree-git-r,
+.tree-git-c {
+  color: var(--vo-color-519aba);
+}
+
+.tree-git-u {
+  color: var(--vo-color-e8a33d);
+}
+
+.tree-git-q {
+  color: var(--vo-color-858585);
 }
 
 /* Main area */
@@ -1860,6 +1895,686 @@ body.layout-resizing-horizontal {
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
+}
+
+/* ---- Source Control ---- */
+
+.sc-panel {
+  overflow: hidden;
+}
+
+.sc-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vo-color-3c3c3c);
+}
+
+.sc-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--vo-color-cccccc);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-header-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.sc-icon-button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--vo-color-cccccc);
+  cursor: pointer;
+}
+
+.sc-icon-button:hover:not(:disabled) {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+.sc-icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sc-hint {
+  margin: 10px 12px;
+  color: var(--vo-color-858585);
+  font-size: 12px;
+}
+
+.sc-error {
+  margin: 10px 12px;
+  color: var(--vo-color-f14c4c);
+  font-size: 12px;
+}
+
+.sc-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background-color: var(--vo-color-2a2a2a);
+  font-size: 11px;
+  color: var(--vo-color-cccccc);
+  user-select: none;
+}
+
+.sc-section-toggle {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--vo-color-9d9d9d);
+  cursor: pointer;
+}
+
+.sc-section-toggle:hover {
+  color: var(--vo-color-ffffff);
+}
+
+.sc-section-chevron {
+  transition: transform 0.1s ease;
+}
+
+.sc-section-chevron.open {
+  transform: rotate(90deg);
+}
+
+.sc-section-label {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 11px;
+  color: var(--vo-color-cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sc-section-label:hover {
+  color: var(--vo-color-ffffff);
+}
+
+.sc-group-count {
+  flex: none;
+  margin-left: auto;
+  color: var(--vo-color-9d9d9d);
+}
+
+.sc-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.sc-row-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vo-color-d4d4d4);
+}
+
+.sc-row-open:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.tasks-status {
+  flex: none;
+  width: 14px;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+  color: var(--vo-color-9d9d9d);
+}
+
+.tasks-status-running {
+  color: var(--vo-color-3fb950);
+  animation: sc-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes sc-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.sc-badge {
+  flex: none;
+  width: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: center;
+}
+
+.sc-row-path {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.sc-row-action {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--vo-color-9d9d9d);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.sc-row:hover .sc-row-action {
+  opacity: 1;
+}
+
+.sc-row-action:hover:not(:disabled) {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+.sc-row-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sc-empty {
+  padding: 6px 12px 8px;
+  color: var(--vo-color-858585);
+  font-size: 12px;
+}
+
+.sc-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--vo-color-3c3c3c);
+  border-radius: 3px;
+  background-color: var(--vo-color-2a2a2a);
+}
+
+.sc-notice-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--vo-color-cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-row-deleted .sc-row-path {
+  color: var(--vo-color-858585);
+  text-decoration: line-through;
+}
+
+.sc-badge-m {
+  color: var(--vo-color-c09553);
+}
+
+.sc-badge-a {
+  color: var(--vo-color-3fb950);
+}
+
+.sc-badge-d {
+  color: var(--vo-color-f14c4c);
+}
+
+.sc-badge-r,
+.sc-badge-c {
+  color: var(--vo-color-519aba);
+}
+
+.sc-badge-u {
+  color: var(--vo-color-e8a33d);
+}
+
+.sc-badge-q {
+  color: var(--vo-color-858585);
+}
+
+/* ---- Source Control Commit box ---- */
+
+.sc-commit {
+  margin: 8px;
+  padding: 8px;
+  border: 1px solid var(--vo-color-3a3d41);
+  border-radius: 4px;
+  background-color: var(--vo-color-252526);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sc-commit-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  padding: 6px 8px;
+  border: 1px solid var(--vo-color-3a3d41);
+  border-radius: 3px;
+  background-color: var(--vo-color-1e1e1e);
+  color: var(--vo-color-d4d4d4);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.sc-commit-input:focus {
+  border-color: var(--vo-color-007acc);
+}
+
+.sc-commit-input::placeholder {
+  color: var(--vo-color-858585);
+}
+
+.sc-commit-error {
+  margin: 0;
+  color: var(--vo-color-f14c4c);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.sc-commit-button {
+  align-self: flex-end;
+  padding: 4px 14px;
+  border: none;
+  border-radius: 3px;
+  background-color: var(--vo-color-094771);
+  color: var(--vo-color-ffffff);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sc-commit-button:hover:not(:disabled) {
+  background-color: var(--vo-color-0e639c);
+}
+
+.sc-commit-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- Primary sidebar views（文件树 / 源代码管理 / 任务） ---- */
+
+.primary-sidebar-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.primary-sidebar-view.hidden {
+  display: none;
+}
+
+/* ---- Commit History panel ---- */
+
+.gh-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gh-commit {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vo-color-d4d4d4);
+}
+
+.gh-commit:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.gh-commit.selected {
+  background-color: var(--vo-color-094771);
+  color: var(--vo-color-ffffff);
+}
+
+.gh-commit-short {
+  flex: none;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--vo-color-9d9d9d);
+}
+
+.gh-commit.selected .gh-commit-short {
+  color: var(--vo-color-ffffff);
+}
+
+.gh-commit-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.gh-commit-message {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.gh-commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--vo-color-9d9d9d);
+}
+
+.gh-commit.selected .gh-commit-meta {
+  color: var(--vo-color-9d9d9d);
+}
+
+.gh-commit-dot {
+  color: var(--vo-color-858585);
+}
+
+.gh-more {
+  margin: 2px 8px 6px;
+  padding: 4px 0;
+  background: transparent;
+  border: 1px solid var(--vo-color-3a3d41);
+  border-radius: 3px;
+  color: var(--vo-color-cccccc);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gh-more:hover:not(:disabled) {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+.gh-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- Commit detail + changed-file tree ---- */
+
+.gh-detail {
+  margin: 6px 8px 10px;
+  padding: 8px;
+  border: 1px solid var(--vo-color-3a3d41);
+  border-radius: 4px;
+  background-color: var(--vo-color-252526);
+}
+
+.gh-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gh-detail-short {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  color: var(--vo-color-519aba);
+}
+
+.gh-detail-parent {
+  font-size: 11px;
+  color: var(--vo-color-9d9d9d);
+}
+
+.gh-detail-message {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--vo-color-d4d4d4);
+  word-break: break-word;
+}
+
+.gh-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--vo-color-9d9d9d);
+}
+
+.gh-detail-files-head {
+  margin-top: 8px;
+  padding: 3px 0;
+  border-top: 1px solid var(--vo-color-3a3d41);
+  font-size: 11px;
+  color: var(--vo-color-cccccc);
+}
+
+.gh-files {
+  margin-top: 2px;
+}
+
+.gh-file-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.gh-dir {
+  width: 100%;
+  gap: 2px;
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vo-color-d4d4d4);
+}
+
+.gh-dir:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.gh-dir-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.gh-file {
+  padding-left: 16px;
+}
+
+.gh-file-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--vo-color-d4d4d4);
+}
+
+.gh-file-open:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.gh-file-path {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+/* ---- Git Diff View ---- */
+
+/* Stacking wrapper: the normal code editor stays mounted below the diff so
+   tabs, models, cursors and scroll positions are never disturbed. */
+.editor-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-stack > .editor-pane {
+  flex: 1;
+}
+
+.diff-view {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--vo-color-1e1e1e);
+}
+
+.diff-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--vo-color-3c3c3c);
+  background-color: var(--vo-color-252526);
+  min-width: 0;
+}
+
+.diff-title {
+  flex: none;
+  max-width: 60%;
+  font-size: 12px;
+  color: var(--vo-color-cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-subtitle {
+  flex: none;
+  font-size: 11px;
+  color: var(--vo-color-9d9d9d);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-spacer {
+  flex: 1;
+}
+
+.diff-close {
+  flex: none;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vo-color-cccccc);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diff-close:hover {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+.diff-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-host {
+  position: absolute;
+  inset: 0;
+}
+
+.diff-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background-color: var(--vo-color-1e1e1e);
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.diff-cover-text {
+  max-width: 100%;
+  font-size: 13px;
+  color: var(--vo-color-858585);
+  text-align: center;
+  word-break: break-word;
 }
 
 /* ---- Quick Open ---- */

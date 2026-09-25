@@ -2,6 +2,8 @@ import { memo, type MouseEvent } from "react";
 import type { TreeNode as TreeNodeType } from "../../types";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { useGitStore, selectNodeGitStatus } from "../../stores/gitStore";
+import { gitBadgeKey } from "../../utils/gitStatusMapping";
 import FolderIcon from "./FolderIcon";
 import FileIcon from "./FileIcon";
 
@@ -19,6 +21,7 @@ function TreeNode({ node, depth, onMenu }: Props) {
 
   const isDir = node.kind === "dir";
   const isSelected = node.path === selectedPath;
+  const gitStatus = useGitStore(selectNodeGitStatus(node.path, isDir));
 
   function handleClick() {
     select(node.path);
@@ -36,7 +39,7 @@ function TreeNode({ node, depth, onMenu }: Props) {
         style={{ paddingLeft: 8 + depth * 14 }}
         onClick={handleClick}
         onContextMenu={(e) => onMenu(e, node)}
-        title={node.path}
+        title={gitStatus?.renamedFrom?.length ? `${node.path}（${gitStatus.status}: ${gitStatus.renamedFrom} → ${node.name}）` : node.path}
       >
         {isDir ? (
           <span className={`tree-chevron${node.expanded ? " open" : ""}`} aria-hidden="true">
@@ -56,6 +59,13 @@ function TreeNode({ node, depth, onMenu }: Props) {
         )}
         {isDir ? <FolderIcon /> : <FileIcon />}
         <span className="file-name">{node.name}</span>
+        {gitStatus && (
+          <span
+            className={`tree-git-status tree-git-${gitBadgeKey(gitStatus.status)}`}
+          >
+            {gitStatus.status}
+          </span>
+        )}
         {node.loading && <span className="tree-spinner" aria-hidden="true" />}
       </div>
       {isDir && node.expanded && (

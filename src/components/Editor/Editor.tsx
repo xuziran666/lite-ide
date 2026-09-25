@@ -13,7 +13,7 @@ import {
 } from "../../utils/autoSave";
 
 /** Exactly what `editor.updateOptions()` accepts: per-editor + global options. */
-type MonacoEditorOptions = monaco.editor.IEditorOptions &
+export type MonacoEditorOptions = monaco.editor.IEditorOptions &
   monaco.editor.IGlobalEditorOptions;
 
 /** Every Monaco option mirrored from `editor.*` in user.json. */
@@ -45,7 +45,7 @@ const MONACO_OPTION_KEYS = [
 ] as const;
 
 /** The full Monaco option set for one `editor` configuration. */
-function monacoOptions(editor: EditorSettings): MonacoEditorOptions {
+export function monacoOptions(editor: EditorSettings): MonacoEditorOptions {
   return {
     fontFamily: editor.fontFamily,
     fontSize: editor.fontSize,
@@ -93,7 +93,7 @@ const NESTED_OPTION_VALUES: Partial<
  * touches nothing else: editing `cursorStyle` must not re-apply the font, and
  * the theme (handled separately with `setTheme`) is never part of this patch.
  */
-function changedMonacoOptions(
+export function changedMonacoOptions(
   prev: EditorSettings,
   next: EditorSettings,
 ): MonacoEditorOptions {

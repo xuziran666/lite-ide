@@ -1,6 +1,7 @@
 pub mod commands;
 mod config;
 mod error;
+mod git;
 mod lsp;
 mod session;
 mod shell;
@@ -32,6 +33,16 @@ pub fn run() {
             commands::fs::get_last_workspace,
             commands::search::list_workspace_files,
             commands::search::search_workspace,
+            commands::git::git_detect_repository,
+            commands::git::git_status,
+            commands::git::git_stage,
+            commands::git::git_unstage,
+            commands::git::git_stage_all,
+            commands::git::git_unstage_all,
+            commands::git::git_diff_file,
+            commands::git::git_commit,
+            commands::git::git_log,
+            commands::git::git_commit_details,
             commands::terminal::terminal_spawn,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,

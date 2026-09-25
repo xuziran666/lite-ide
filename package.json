@@ -8,7 +8,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:git-status": "node src/utils/gitStatusMapping.test.ts",
+    "test:path-identity": "node src/utils/pathIdentity.test.ts",
+    "test:diff-sides": "node src/utils/diffSides.test.ts",
+    "test:commit-tree": "node src/utils/gitCommitTree.test.ts",
+    "test:commit-diff-sides": "node src/utils/commitDiffSides.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
