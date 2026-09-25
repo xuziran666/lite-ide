@@ -98,10 +98,13 @@ export function createModel(
   return model;
 }
 
-export function markSaved(path: string) {
+/** Advance the saved baseline to `version`, defaulting to the current one.
+ *  Pass the version that was actually written so that edits made while the
+ *  write was in flight remain dirty and get picked up by the next save. */
+export function markSaved(path: string, version?: number) {
   const entry = tracked.get(key(path));
   if (entry && !entry.model.isDisposed()) {
-    entry.savedVersion = entry.model.getVersionId();
+    entry.savedVersion = version ?? entry.model.getVersionId();
   }
 }
 

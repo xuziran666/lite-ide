@@ -11,7 +11,7 @@ import {
 import * as modelStore from "../editor/modelStore";
 import { useConfigStore } from "./configStore";
 import { basename, dirname, joinPath, languageForPath } from "../utils/language";
-import { canonicalPath, sameFile } from "../utils/pathIdentity";
+import { canonicalPath, fileKey, sameFile } from "../utils/pathIdentity";
 
 /**
  * Tabs being closed in a batch (close others / close right / close all).
@@ -79,6 +79,35 @@ function pushClosedTab(closedTabs: string[], path: string): string[] {
   return [path, ...closedTabs.filter((p) => p !== path)];
 }
 
+/** The content disk is known to hold for each open file, keyed by `fileKey`.
+ *
+ *  A watcher event carries no provenance, and by the time the event for our own
+ *  write arrives the model has normally moved on (Auto Save fires while the user
+ *  keeps typing), so matching disk against the model cannot tell our own write
+ *  apart from a real external edit. Instead remember what disk is known to
+ *  contain, updated after every successful write and whenever we adopt disk
+ *  content: a watcher event whose disk content still equals this is by
+ *  definition not an external edit, so it must be ignored no matter what the
+ *  model holds or how many events a single save produces.
+ *
+ *  This is module state on purpose: it is bookkeeping, not UI state, and
+ *  putting file contents in the store would re-render every subscriber. */
+const diskBaseline = new Map<string, string>();
+
+/** Record the content disk is known to hold for `path`. */
+function setDiskBaseline(path: string, content: string): void {
+  diskBaseline.set(fileKey(path), content);
+}
+
+/** True when `content` is exactly what lite-ide last put on disk for `path`. */
+function isOwnWrite(path: string, content: string): boolean {
+  return diskBaseline.get(fileKey(path)) === content;
+}
+
+function forgetDiskBaseline(path: string): void {
+  diskBaseline.delete(fileKey(path));
+}
+
 export const useEditorStore = create<EditorStore>((set, get) => ({
   openFiles: [],
   activePath: null,
@@ -114,6 +143,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     modelStore.createModel(target, content, (dirty) => {
       get().markDirty(target, dirty);
     });
+    // Disk holds exactly what we just read, so that is the baseline any later
+    // watcher event must differ from to count as an external edit.
+    setDiskBaseline(target, content);
 
     set((s) => ({
       openFiles: [
@@ -241,6 +273,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     for (const p of targets) {
       modelStore.disposeModel(p);
+      forgetDiskBaseline(p);
     }
 
     const remaining = openFiles.filter((t) => !closing.has(t.path));
@@ -292,16 +325,29 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const tab = get().openFiles.find((t) => t.path === target);
     if (tab?.readOnly) return false;
     const content = tracked.model.getValue();
+    // The exact version this write persists. Anything typed while the write is
+    // in flight must stay dirty afterwards, otherwise the next Auto Save tick
+    // would skip those characters and the watcher event would revert the model
+    // back to the content written here.
+    const version = tracked.model.getVersionId();
     try {
       if (tab?.external) {
         await writeGlobalFile(basename(target), content);
       } else {
         await writeFile(target, content);
       }
-      modelStore.markSaved(target);
+      modelStore.markSaved(target, version);
+      // Only reached once the write has succeeded, so this baseline always
+      // reflects bytes that really are on disk. Successive Auto Saves overwrite
+      // it with the newer content, which keeps the watcher events of an earlier
+      // save recognisable only while disk still matches them.
+      setDiskBaseline(target, content);
+      // Derive the tab flag after marking saved: it is only clean when the
+      // model has not moved on since the version we just wrote.
+      const dirty = modelStore.isDirty(target);
       set((s) => ({
         openFiles: s.openFiles.map((t) =>
-          t.path === target ? { ...t, dirty: false } : t,
+          t.path === target ? { ...t, dirty } : t,
         ),
         error: null,
       }));
@@ -340,6 +386,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         const ok = await get().save(path);
         // Keep the confirmation open when saving fails, so nothing is lost.
         if (!ok) return;
+        // Editing during the write leaves the tab dirty: refuse to close so
+        // those keystrokes are not silently discarded.
+        if (modelStore.isDirty(path)) return;
       }
       const remaining = queue.dirtyTargets.filter((p) => p !== path);
       // Discarded dirty content is not recoverable, so only saved closes are
@@ -366,6 +415,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const ok = await get().save(path);
       // Keep the confirmation open when saving fails, so nothing is lost.
       if (!ok) return;
+      // Editing during the write leaves the tab dirty: refuse to close so
+      // those keystrokes are not silently discarded.
+      if (modelStore.isDirty(path)) return;
     }
     get().closeTab(path, saveChanges);
     set({ pendingClosePath: null });
@@ -397,6 +449,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const oldPath = tab.path;
     const target = canonicalPath(newPath);
     const dirty = modelStore.isDirty(oldPath);
+    // A rename does not change file content, so the baseline carries over.
+    const baseline = diskBaseline.get(fileKey(oldPath));
+    if (baseline !== undefined) {
+      forgetDiskBaseline(oldPath);
+      setDiskBaseline(target, baseline);
+    }
     modelStore.rekeyPath(oldPath, target, (d) => get().markDirty(target, d));
 
     set((s) => ({
@@ -432,29 +490,40 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       if (tab.readOnly) continue;
 
       const path = tab.path;
+      let content: string;
+      try {
+        content = await readFile(path);
+      } catch {
+        // The file may have been deleted between the event and the read.
+        continue;
+      }
+
+      // Judge the event by what disk holds, never by the dirty flag.
+      const model = modelStore.getModel(path);
+
+      // A. Disk already matches the model: nothing diverged, stay silent.
+      if (model && model.getValue() === content) continue;
+
+      // B. Disk still holds exactly what lite-ide last wrote here. This is our
+      // own Auto Save / Ctrl+S coming back through the watcher, even though the
+      // user has kept typing since (so the model is ahead and dirty). Ignore it
+      // completely: no notice, no setValue, no cursor/selection change and no
+      // dirty flag change. Every further event for this same write also lands
+      // here while disk is unchanged, so one save never reports twice.
+      if (isOwnWrite(path, content)) continue;
+
+      // C. Disk holds something lite-ide never wrote: a real external edit.
       if (modelStore.isDirty(path)) {
         notices.push(`${basename(path)} 已在磁盘上被修改，本地未保存的更改已保留`);
         continue;
       }
-
-      try {
-        const content = await readFile(path);
-        if (modelStore.isDirty(path)) {
-          notices.push(`${basename(path)} 已在磁盘上被修改，本地未保存的更改已保留`);
-          continue;
-        }
-        // The app's own save (Auto Save / Ctrl+S) returns to us as a watcher
-        // event carrying the exact same content. Reloading that with setValue
-        // would reset the cursor/selection/scroll position, so only replace the
-        // model content when the file really changed on disk.
-        const model = modelStore.getModel(path);
-        if (model && model.getValue() !== content) {
-          modelStore.setModelContent(path, content);
-        }
-        get().markDirty(path, false);
-      } catch {
-        // The file may have been deleted between the event and the read.
+      if (model) {
+        modelStore.setModelContent(path, content);
+        // Adopt the reloaded content as the new baseline, so a later external
+        // revert to some older lite-ide content is still detected.
+        setDiskBaseline(path, content);
       }
+      get().markDirty(path, false);
     }
     if (notices.length > 0) {
       set((s) => ({
@@ -596,6 +665,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     for (const t of get().openFiles) {
       modelStore.disposeModel(t.path);
     }
+    diskBaseline.clear();
     set({
       openFiles: [],
       activePath: null,
