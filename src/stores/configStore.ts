@@ -65,7 +65,11 @@ function cloneEditor(editor: EditorSettings): EditorSettings {
   };
 }
 
-const DEFAULT_TERMINAL: TerminalSettings = { defaultShell: "auto" };
+const DEFAULT_TERMINAL: TerminalSettings = {
+  defaultShell: "auto",
+  fontFamily: "Cascadia Mono, Consolas, \"Courier New\", monospace",
+  fontSize: 14,
+};
 
 const DEFAULT_GENERAL: GeneralSettings = {
   restoreLastWorkspace: true,

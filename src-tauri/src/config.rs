@@ -173,6 +173,10 @@ pub struct FilesConfigFile {
 pub struct TerminalConfigFile {
     #[serde(default)]
     pub default_shell: Option<String>,
+    #[serde(default)]
+    pub font_family: Option<String>,
+    #[serde(default)]
+    pub font_size: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -332,12 +336,16 @@ impl Default for FilesSettings {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub default_shell: String,
+    pub font_family: String,
+    pub font_size: u32,
 }
 
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             default_shell: "auto".to_string(),
+            font_family: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
+            font_size: DEFAULT_TERMINAL_FONT_SIZE,
         }
     }
 }
@@ -409,6 +417,15 @@ fn sanitize_word_wrap(value: &str) -> String {
 
 /// The fallback font stack when `editor.fontFamily` is missing or blank.
 const DEFAULT_FONT_FAMILY: &str = "Consolas, 'Courier New', monospace";
+
+/// The fallback font stack when `terminal.fontFamily` is missing or blank.
+/// Matches the terminal's historical hardcoded xterm font exactly so existing
+/// installs keep their current terminal look after upgrading.
+const DEFAULT_TERMINAL_FONT_FAMILY: &str =
+    "Cascadia Mono, Consolas, \"Courier New\", monospace";
+
+/// The fallback terminal font size (xterm's historical hardcoded default).
+const DEFAULT_TERMINAL_FONT_SIZE: u32 = 14;
 
 /// Keep only values Monaco actually accepts; anything else falls back.
 fn sanitize_enum(value: &str, allowed: &[&str], fallback: &str) -> String {
@@ -580,6 +597,14 @@ fn sanitize_file(mut file: UserConfigFile) -> UserConfigFile {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "auto".to_string());
     t.default_shell = Some(shell);
+    let family = t
+        .font_family
+        .take()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_TERMINAL_FONT_FAMILY.to_string());
+    t.font_family = Some(family);
+    t.font_size = Some(t.font_size.unwrap_or(DEFAULT_TERMINAL_FONT_SIZE).clamp(8, 40));
 
     let g = &mut file.general;
     g.restore_last_workspace = Some(g.restore_last_workspace.unwrap_or(true));
@@ -704,6 +729,14 @@ fn parse_user_config(text: &str) -> UserConfig {
                         .terminal
                         .default_shell
                         .unwrap_or_else(|| "auto".to_string()),
+                    font_family: file
+                        .terminal
+                        .font_family
+                        .unwrap_or_else(|| DEFAULT_TERMINAL_FONT_FAMILY.to_string()),
+                    font_size: file
+                        .terminal
+                        .font_size
+                        .unwrap_or(DEFAULT_TERMINAL_FONT_SIZE),
                 },
                 general: GeneralSettings {
                     restore_last_workspace: file
@@ -818,7 +851,7 @@ mod tests {
         defaults, parse_user_config, sanitize_file, AutoSaveSettings,
         BracketPairColorizationSettings, EditorSettings, FilesSettings, GeneralSettings,
         GuidesSettings, LspSettings, TerminalSettings, UserConfig, UserConfigFile,
-        DEFAULT_FONT_FAMILY,
+        DEFAULT_FONT_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE,
     };
 
     #[test]
@@ -890,6 +923,8 @@ mod tests {
         assert_eq!(cfg.editor.cursor_style, "block");
         assert_eq!(cfg.editor.cursor_blinking, "smooth");
         assert_eq!(cfg.terminal.default_shell, "cmd.exe");
+        assert_eq!(cfg.terminal.font_family, DEFAULT_TERMINAL_FONT_FAMILY);
+        assert_eq!(cfg.terminal.font_size, DEFAULT_TERMINAL_FONT_SIZE);
         assert!(!cfg.general.restore_last_workspace);
         assert!(!cfg.general.confirm_before_close);
         assert_eq!(cfg.general.theme, "dark");
@@ -936,6 +971,8 @@ mod tests {
         assert!(cfg.editor.copy_with_syntax_highlighting);
         assert!(cfg.editor.bracket_pair_colorization.enabled);
         assert_eq!(cfg.terminal.default_shell, "auto");
+        assert_eq!(cfg.terminal.font_family, DEFAULT_TERMINAL_FONT_FAMILY);
+        assert_eq!(cfg.terminal.font_size, DEFAULT_TERMINAL_FONT_SIZE);
         assert!(cfg.general.restore_last_workspace);
         assert!(cfg.general.confirm_before_close);
         assert!(!cfg.files.auto_save.after_delay);
@@ -980,6 +1017,36 @@ mod tests {
     fn empty_terminal_shell_falls_back_to_auto() {
         let cfg = parse_user_config(r#"{"terminal":{"defaultShell":""}}"#);
         assert_eq!(cfg.terminal.default_shell, "auto");
+        assert_eq!(cfg.terminal.font_family, DEFAULT_TERMINAL_FONT_FAMILY);
+        assert_eq!(cfg.terminal.font_size, DEFAULT_TERMINAL_FONT_SIZE);
+    }
+
+    #[test]
+    fn parses_terminal_font_overrides() {
+        let cfg = parse_user_config(
+            r#"{"terminal":{"fontFamily":"Fira Code, monospace","fontSize":20}}"#,
+        );
+        assert_eq!(cfg.terminal.default_shell, "auto");
+        assert_eq!(cfg.terminal.font_family, "Fira Code, monospace");
+        assert_eq!(cfg.terminal.font_size, 20);
+    }
+
+    #[test]
+    fn clamps_out_of_range_terminal_font_size() {
+        let low = parse_user_config(r#"{"terminal":{"fontSize":2}}"#);
+        assert_eq!(low.terminal.font_size, 8);
+        let high = parse_user_config(r#"{"terminal":{"fontSize":200}}"#);
+        assert_eq!(high.terminal.font_size, 40);
+    }
+
+    #[test]
+    fn blank_terminal_font_family_falls_back_to_default() {
+        let blank = parse_user_config(r#"{"terminal":{"fontFamily":""}}"#);
+        assert_eq!(blank.terminal.font_family, DEFAULT_TERMINAL_FONT_FAMILY);
+        let spaces = parse_user_config(r#"{"terminal":{"fontFamily":"   "}}"#);
+        assert_eq!(spaces.terminal.font_family, DEFAULT_TERMINAL_FONT_FAMILY);
+        let kept = parse_user_config(r#"{"terminal":{"fontFamily":"  Cascadia Code  "}}"#);
+        assert_eq!(kept.terminal.font_family, "Cascadia Code");
     }
 
     #[test]
@@ -1030,6 +1097,11 @@ mod tests {
             Some(true)
         );
         assert_eq!(file.terminal.default_shell.as_deref(), Some("auto"));
+        assert_eq!(
+            file.terminal.font_family.as_deref(),
+            Some(DEFAULT_TERMINAL_FONT_FAMILY)
+        );
+        assert_eq!(file.terminal.font_size, Some(DEFAULT_TERMINAL_FONT_SIZE));
         assert_eq!(file.general.restore_last_workspace, Some(true));
         assert_eq!(file.general.confirm_before_close, Some(true));
         assert_eq!(file.files.auto_save.after_delay, Some(false));
@@ -1082,6 +1154,14 @@ mod tests {
         let cleaned = sanitize_file(file);
         assert_eq!(cleaned.editor.font_size, Some(14));
         assert_eq!(cleaned.terminal.default_shell.as_deref(), Some("auto"));
+        assert_eq!(
+            cleaned.terminal.font_family.as_deref(),
+            Some(DEFAULT_TERMINAL_FONT_FAMILY)
+        );
+        assert_eq!(
+            cleaned.terminal.font_size,
+            Some(DEFAULT_TERMINAL_FONT_SIZE)
+        );
     }
 
     #[test]
@@ -1141,6 +1221,8 @@ mod tests {
             },
             terminal: TerminalSettings {
                 default_shell: "cmd.exe".to_string(),
+                font_family: "Cascadia Mono, monospace".to_string(),
+                font_size: 18,
             },
             general: GeneralSettings {
                 restore_last_workspace: false,
@@ -1202,6 +1284,10 @@ mod tests {
         assert!(text.contains(r#""mouseWheelZoom":true"#), "{text}");
         assert!(text.contains(r#""theme":"hc-black""#), "{text}");
         assert!(text.contains(r#""defaultShell":"cmd.exe""#), "{text}");
+        assert!(
+            text.contains(r#""fontFamily":"Cascadia Mono, monospace","fontSize":18"#),
+            "{text}"
+        );
         assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
         assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");
         assert!(text.contains(r#""autoSave":{"afterDelay":true"#), "{text}");

@@ -12,6 +12,7 @@ import {
 } from "../../commands";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
+import { useConfigStore } from "../../stores/configStore";
 
 function toUint8Array(message: unknown): Uint8Array {
   if (message instanceof Uint8Array) return message;
@@ -82,12 +83,13 @@ function usePtySession(id: number, active: boolean) {
     // restart starts with a clean xterm surface.
     host.textContent = "";
 
+    const initial = useConfigStore.getState();
     const term = new Terminal({
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "block",
-      fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
-      fontSize: 14,
+      fontFamily: initial.terminal.fontFamily,
+      fontSize: initial.terminal.fontSize,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -145,7 +147,7 @@ function usePtySession(id: number, active: boolean) {
     // Only the visible, active terminal is fit and reports its size. The
     // hidden instances skip resizing (their container has zero width), and a
     // collapsed panel reports nothing at all.
-    const onResize = () => {
+    const fitAndReport = () => {
       requestAnimationFrame(() => {
         const current = termRef.current;
         if (!current) return;
@@ -165,6 +167,7 @@ function usePtySession(id: number, active: boolean) {
         }
       });
     };
+    const onResize = fitAndReport;
 
     const resizeObserver = new ResizeObserver(onResize);
     resizeObserver.observe(host);
@@ -172,6 +175,22 @@ function usePtySession(id: number, active: boolean) {
       onResize();
       term.focus();
     }
+
+    // Hot-apply terminal font changes to this existing xterm without touching
+    // the PTY or the buffer. A font-size change alters the cell dimensions, so
+    // every update re-fits and re-reports the size through the same path used
+    // by the ResizeObserver above; hidden instances skip that via activeRef.
+    const unsubFont = useConfigStore.subscribe((state, prev) => {
+      if (
+        state.terminal.fontFamily === prev.terminal.fontFamily &&
+        state.terminal.fontSize === prev.terminal.fontSize
+      ) {
+        return;
+      }
+      term.options.fontFamily = state.terminal.fontFamily;
+      term.options.fontSize = state.terminal.fontSize;
+      fitAndReport();
+    });
 
     chainRef.current = chainRef.current
       .then(() => terminalKill(id).catch(() => undefined))
@@ -187,6 +206,7 @@ function usePtySession(id: number, active: boolean) {
 
     return () => {
       versionRef.current += 1;
+      unsubFont();
       chainRef.current = chainRef.current.then(() =>
         terminalKill(id).catch(() => undefined),
       );
@@ -206,6 +226,32 @@ function usePtySession(id: number, active: boolean) {
       termRef.current?.focus();
     });
   }, [active]);
+
+  // Ctrl/Cmd + wheel zoom: mirrors the editor's Ctrl+wheel behavior, gated by
+  // the single `editor.mouseWheelZoom` switch. Adjusts `terminal.fontSize`
+  // (8..40) and persists it; the config subscription above hot-applies the new
+  // size to every terminal, then re-fits and re-reports the size. Plain wheels
+  // are left untouched so xterm still scrolls normally.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      // Swallow the event so xterm neither scrolls nor the webview zooms.
+      e.preventDefault();
+      e.stopPropagation();
+      const store = useConfigStore.getState();
+      if (!store.editor.mouseWheelZoom) return;
+      const step = e.deltaY > 0 ? -1 : 1;
+      const next = Math.min(40, Math.max(8, store.terminal.fontSize + step));
+      if (next !== store.terminal.fontSize) {
+        void store.updateTerminal({ fontSize: next });
+      }
+    };
+    host.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () =>
+      host.removeEventListener("wheel", onWheel, { capture: true });
+  }, []);
 
   return { hostRef, termRef, restart, exited, spawnedOnceRef, runAfterSpawn };
 }

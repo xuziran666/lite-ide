@@ -156,6 +156,8 @@ export interface EditorSettings {
 
 export interface TerminalSettings {
   defaultShell: string;
+  fontFamily: string;
+  fontSize: number;
 }
 
 export interface GeneralSettings {
