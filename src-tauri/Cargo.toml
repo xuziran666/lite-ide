@@ -1,6 +1,6 @@
 [package]
 name = "lite-ide"
-version = "0.2.0"
+version = "0.2.2"
 description = "A lightweight, fast, cross-platform code editor built with Tauri"
 authors = ["xuziran666"]
 license = "MIT"
