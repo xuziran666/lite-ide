@@ -416,6 +416,14 @@ function AppLayout() {
   }, []);
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
+  const toggleTerminal = useCallback(
+    () => setTerminalCollapsed((value) => !value),
+    [],
+  );
+  const togglePrimarySidebar = useCallback(
+    () => useSearchStore.getState().togglePrimarySidebar(),
+    [],
+  );
   const toggleRightSidebar = useCallback(
     () => useSearchStore.getState().toggleRightSidebar(),
     [],
@@ -436,6 +444,10 @@ function AppLayout() {
   return (
     <div className="app-layout">
 <TopBar
+          primarySidebarVisible={activePrimarySidebar !== null}
+          onTogglePrimarySidebar={togglePrimarySidebar}
+          terminalVisible={!terminalCollapsed}
+          onToggleTerminal={toggleTerminal}
           secondarySidebarVisible={rightSidebarOpen}
           onToggleSecondarySidebar={toggleRightSidebar}
         />

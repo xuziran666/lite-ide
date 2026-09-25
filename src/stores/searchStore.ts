@@ -30,6 +30,8 @@ interface SearchStore {
   rightSidebarTab: RightSidebarTab;
   /** Left (primary) sidebar active view, or null when it is collapsed. */
   activePrimarySidebar: PrimarySidebarView | null;
+  /** The last non-collapsed primary sidebar view, restored on re-expand. */
+  primarySidebarLastView: PrimarySidebarView;
   /** References results; null until a search has run for the symbol. */
   references: ReferenceItem[] | null;
   referencesSymbol: string | null;
@@ -44,6 +46,7 @@ interface SearchStore {
   toggleRightSidebar: () => void;
   closeRightSidebar: () => void;
   selectPrimarySidebar: (tab: PrimarySidebarView) => void;
+  togglePrimarySidebar: () => void;
   beginReferences: (symbol: string) => void;
   finishReferences: (items: ReferenceItem[]) => void;
   clearReferences: () => void;
@@ -57,6 +60,7 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   rightSidebarOpen: false,
   rightSidebarTab: "outline",
   activePrimarySidebar: "explorer",
+  primarySidebarLastView: "explorer",
   references: null,
   referencesSymbol: null,
   referencesLoading: false,
@@ -96,8 +100,21 @@ export const useSearchStore = create<SearchStore>((set, get) => ({
   // VS Code semantics: clicking the already-active Activity Bar icon collapses
   // the primary sidebar; clicking any other icon switches the view.
   selectPrimarySidebar: (tab) =>
+    set((s) => {
+      const next = s.activePrimarySidebar === tab ? null : tab;
+      return {
+        activePrimarySidebar: next,
+        primarySidebarLastView: next ?? s.primarySidebarLastView,
+      };
+    }),
+
+  // Top Bar left-panel button: fully collapse/expand the shared primary
+  // sidebar. Collapsing remembers the current view so re-expanding restores it,
+  // and the width is kept by AppLayout (it never resets on collapse).
+  togglePrimarySidebar: () =>
     set((s) => ({
-      activePrimarySidebar: s.activePrimarySidebar === tab ? null : tab,
+      activePrimarySidebar:
+        s.activePrimarySidebar === null ? s.primarySidebarLastView : null,
     })),
 
   beginReferences: (symbol) =>

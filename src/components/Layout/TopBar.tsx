@@ -9,11 +9,11 @@ function workspaceName(path: string): string {
 
 function SecondarySidebarIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
       <rect
         x="3"
         y="4"
-        width="18"
+        width="16"
         height="16"
         rx="1.5"
         fill="none"
@@ -25,6 +25,56 @@ function SecondarySidebarIcon() {
         y1="4"
         x2="17"
         y2="20"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function PrimarySidebarIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <rect
+        x="3"
+        y="4"
+        width="16"
+        height="16"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <line
+        x1="7"
+        y1="4"
+        x2="7"
+        y2="20"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function TerminalPanelIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <rect
+        x="3"
+        y="4"
+        width="16"
+        height="16"
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+      />
+      <line
+        x1="3"
+        y1="17"
+        x2="21"
+        y2="17"
         stroke="currentColor"
         strokeWidth="1.6"
       />
@@ -88,11 +138,19 @@ function CloseIcon() {
 }
 
 interface TopBarProps {
+  primarySidebarVisible: boolean;
+  onTogglePrimarySidebar: () => void;
+  terminalVisible: boolean;
+  onToggleTerminal: () => void;
   secondarySidebarVisible: boolean;
   onToggleSecondarySidebar: () => void;
 }
 
 function TopBar({
+  primarySidebarVisible,
+  onTogglePrimarySidebar,
+  terminalVisible,
+  onToggleTerminal,
   secondarySidebarVisible,
   onToggleSecondarySidebar,
 }: TopBarProps) {
@@ -144,6 +202,24 @@ function TopBar({
         </span>
       )}
       <span className="top-bar-spacer" data-tauri-drag-region />
+      <button
+        type="button"
+        className={
+          primarySidebarVisible ? "top-bar-button active" : "top-bar-button"
+        }
+        title={primarySidebarVisible ? "隐藏左侧栏" : "显示左侧栏"}
+        onClick={onTogglePrimarySidebar}
+      >
+        <PrimarySidebarIcon />
+      </button>
+      <button
+        type="button"
+        className={terminalVisible ? "top-bar-button active" : "top-bar-button"}
+        title={terminalVisible ? "隐藏底部终端" : "显示底部终端"}
+        onClick={onToggleTerminal}
+      >
+        <TerminalPanelIcon />
+      </button>
       <button
         type="button"
         className={
