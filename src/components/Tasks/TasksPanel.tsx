@@ -1,11 +1,29 @@
 import { useEffect } from "react";
 import { useTaskStore } from "../../stores/taskStore";
+import { useEditorStore } from "../../stores/editorStore";
+
+const TASKS_FALLBACK = '{\n  "tasks": []\n}\n';
 
 function RefreshIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7M13.5 2.5v2.2h-2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function OpenTasksIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M4 2h5l3 3v9H4V2zM9 2v3h3"
         fill="none"
         stroke="currentColor"
         strokeWidth="1.4"
@@ -37,6 +55,19 @@ function TasksPanel() {
       <div className="sc-header">
         <span className="sc-title">任务</span>
         <div className="sc-header-actions">
+          <button
+            type="button"
+            className="sc-icon-button"
+            title="打开 tasks.json"
+            onClick={() =>
+              void useEditorStore.getState().openGlobalFile(
+                "tasks.json",
+                TASKS_FALLBACK,
+              )
+            }
+          >
+            <OpenTasksIcon />
+          </button>
           <button
             type="button"
             className="sc-icon-button"
