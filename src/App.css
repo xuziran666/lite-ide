@@ -151,9 +151,9 @@ body,
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   height: 36px;
-  padding: 0 0 0 12px;
+  padding: 0 4px 0 8px;
   background-color: var(--vo-color-252526);
   border-bottom: 1px solid var(--vo-color-3c3c3c);
   color: var(--vo-color-cccccc);
@@ -163,7 +163,7 @@ body,
 .top-bar-brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   font-size: 13px;
   font-weight: 600;
   color: var(--vo-color-ffffff);
@@ -178,7 +178,7 @@ body,
 }
 
 .top-bar-workspace {
-  max-width: 320px;
+  max-width: 280px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -203,7 +203,7 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   background: transparent;
   border: none;
   color: var(--vo-color-cccccc);
@@ -229,7 +229,7 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
+  width: 32px;
   height: 30px;
   padding: 0;
   background: transparent;
