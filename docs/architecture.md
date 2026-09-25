@@ -1,6 +1,6 @@
 # lite-ide 架构说明
 
-> 版本 0.1.0 · 代码基线 `main@811fb21`
+> 版本 0.2.0 · 代码基线 `main@f027013`
 
 ## 1. 技术栈与版本
 
@@ -16,13 +16,13 @@
 
 ```
 lite-ide/
-├── src/                        前端（59 个 ts/tsx，含类型声明与样式）
-│   ├── commands/index.ts       全部 IPC 调用的唯一出口（28 个命令封装）
+├── src/                        前端（75 个 ts/tsx，含类型声明与样式）
+│   ├── commands/index.ts       全部 IPC 调用的唯一出口（38 个命令封装）
 │   ├── config/keybindings.ts   键位动作定义 / 解析 / 录制校验 / 双击 Ctrl 标记
 │   ├── components/
 │   │   ├── Layout/             AppLayout（骨架/快捷键/关窗保护/设置覆盖区/右侧栏）、ActivityBar、
-│   │   │                       TopBar（自定义标题栏：Logo + 品牌 + 工作区名 + 右侧栏开关 +
-│   │   │                       任务中心 + 最小化/最大化(还原)/关闭 + 拖拽区）、StatusBar、
+│   │   │                       TopBar（自定义标题栏：Logo + 品牌 + 工作区名 + 三个布局切换按钮（左主栏 / 终端 / 右栏）
+│   │   │                       + 任务中心 + 最小化/最大化(还原)/关闭 + 拖拽区）、StatusBar、
 │   │   │                       RightSidebar、WorkspacePicker、CloseConfirmDialog
 │   │   ├── FileTree/           FileTree、TreeNode、ContextMenu、NameInputDialog、
 │   │   │                       ConfirmDialog、FileIcon、FolderIcon
@@ -41,7 +41,7 @@ lite-ide/
 │   ├── lsp/                    protocol（wire 类型与转换）、languages（语言描述表）、
 │   │                           client（通用 LSP 客户端：session/事件/provider/定义跳转/引用/重命名/签名/代码操作/格式化）、
 │   │                           workspaceEdit（WorkspaceEdit 解析与安全应用）
-│   ├── stores/                 workspaceStore、fileTreeStore、editorStore、configStore、
+│   ├── stores/                 workspaceStore、fileTreeStore、editorStore、configStore、gitStore、diffStore、
 │   │                           terminalStore、taskStore、searchStore、uiStore
 │   ├── types/                  index.ts（DirEntry/TreeNode/Tab/CursorInfo）、monaco-internals.d.ts
 │   ├── utils/                  language.ts（basename/dirname/joinPath/语言映射）、
@@ -50,10 +50,10 @@ lite-ide/
 │   │                           路径同一性 + 工作区内判定，编辑器打开入口与「打开文件」共用）、
 │   │                           autoSave.ts（自动保存调度：延迟/失焦触发）、
 │   │                           taskVariables.ts（任务变量展开 + Windows 路径归一化）
-│   └── App.css                 全部样式（1974 行，含 Phase 13.1 `--vo-*` 设计 Token 层）
-└── src-tauri/                  后端（23 个 Rust 文件 + 配置）
+│   └── App.css                 全部样式（2325 行，含 Phase 13.1 `--vo-*` 设计 Token 层）
+└── src-tauri/                  后端（25 个 Rust 文件 + 配置）
     ├── src/
-    │   ├── lib.rs              插件与命令注册（28 个命令）
+    │   ├── lib.rs              插件与命令注册（38 个命令 + 10 个 Git 命令）
     │   ├── state.rs            AppState：workspace / watcher / terminals(HashMap) / lsp(HashMap<语言, session>)
     │   ├── session.rs          session.json 读写（容错降级）
     │   ├── config.rs           user.json 解析/钳制/写回（含 lsp 节）、configured_shell、app_config_dir
@@ -99,7 +99,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 - 启动顺序：**先加载 `user.json`（`configStore.load()`），再据 `general.restoreLastWorkspace` 决定是否恢复上次工作区**，因此配置可以关闭自动恢复；
 - 打开工作区会重置 `editorStore` / `fileTreeStore` / `terminalStore` / `taskStore` / `searchStore` 的运行时状态并重新 `loadRoot`；Rust 侧 `set_workspace` 停止全部终端与语言服务器；任务列表为全局配置，不随工作区切换丢失。
 
-## 4. IPC 命令清单（28 个）
+## 4. IPC 命令清单（38 个）
 
 | # | 命令 | 参数 | 返回 | 说明 |
 |---|---|---|---|---|
@@ -131,6 +131,16 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | 26 | `lsp_stop` | `language` | — | 停止某语言服务器 |
 | 27 | `lsp_notify` | `language`, `method`, `params` | — | 发送通知（服务器未运行则静默） |
 | 28 | `lsp_request` | `language`, `method`, `params` | `Value` | 发送请求并等待结果（10s 超时） |
+| 29 | `git_detect_repository` | `workspace` | `boolean` | 仓库检测（`git rev-parse --show-toplevel`） |
+| 30 | `git_status` | `workspace` | `GitStatus`（分双组） | 状态读取（`git status --short --untracked-files=all` + `git diff --stat`） |
+| 31 | `git_stage` | `workspace`, `path` | — | 暂存单文件（`git add -- <path>`） |
+| 32 | `git_unstage` | `workspace`, `path` | — | 取消暂存单文件（`git restore --staged -- <path>`） |
+| 33 | `git_stage_all` | `workspace` | — | 全部暂存（`git add -A`） |
+| 34 | `git_unstage_all` | `workspace` | — | 全部取消暂存（`git restore --staged -- .`） |
+| 35 | `git_diff_file` | `workspace`, `path`, `side1`, `side2` | `string\|null` | 单文件 Diff 双侧读取（HEAD/索引/工作区/空 任意两侧，`git show` 回退磁盘） |
+| 36 | `git_commit` | `workspace`, `message` | — | 提交（`git commit -m <message>`） |
+| 37 | `git_log` | `workspace`, `oldestId?`, `limit` | `GitLogEntry[]` | 提交历史（分页光标 + 每页限制） |
+| 38 | `git_commit_details` | `workspace`, `commitId` | `GitCommitDetails` | 提交详情（信息/时间/父提交/文件清单） |
 
 ## 5. 事件契约
 
@@ -303,14 +313,14 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 - 终端复制使用 WebView 的 `navigator.clipboard`（标准 Web API），无需额外能力声明；事件监听（`listen`、`onCloseRequested`）依赖 `core:event:default` 中的 `allow-listen`；
 - 窗口（`tauri.conf.json`）：**`decorations: false`**（去掉系统原生标题栏，由 `TopBar` 自绘 36px 自定义标题栏）、默认 `800×600`，最小 `720×480`，`bundle.icon` 引用 `icons/` 下由项目 Logo 生成的图标，`beforeDevCommand` 为 `pnpm dev`，`frontendDist` 指向 `../dist`。
 
-## 16. 测试覆盖（116 个 Rust 单测，Windows 上运行 115 个）
+## 16. 测试覆盖（167 个 Rust 单测，Windows 上运行 166 个）
 
 | 模块 | 数量 | 覆盖点 |
 |---|---|---|
 | `commands/fs.rs` | 21 | 路径归一化、工作区内/外目标校验、绝对路径与 `..` 逃逸、symlink 逃逸、名称合法性、文件与目录创建、重复创建、重命名与冲突、删除（含递归）、根目录保护、隐藏目录过滤、watcher 忽略判定、外部只读读取（绝对路径/穿越/目录/缺失/正常） |
 | `commands/search.rs` | 6 | 文件列举跳过隐藏目录、隐藏目录判定、明文搜索（含 `node_modules`）、大小写敏感、正则（含非法）、空查询拒绝 |
 | `commands/terminal.rs` | 5（含 1 个 `#[cfg(not(windows))]`） | Windows 扩展长度路径（`\\?\`）与 UNC 前缀还原、普通路径保持不变 |
-| `config.rs` | 17 | 默认键位、键位合并/未知动作忽略、编辑器/终端/通用覆盖解析、缺失分区回退、越界钳制、`general.theme`/`editor.theme` 白名单回退、空 shell 回退、`lsp` 默认/覆盖/空白回退、损坏/空 `user.json` 降级、camelCase 序列化键名 |
+| `config.rs` | 25 | 默认键位、键位合并/未知动作忽略、编辑器/终端/通用覆盖解析、缺失分区回退、越界钳制、`general.theme`/`editor.theme` 白名单回退、空 shell 回退、`lsp` 默认/覆盖/空白回退、损坏/空 `user.json` 降级、camelCase 序列化键名 |
 | `tasks.rs` | 5 | 任务列表解析、空对象容错、非法 JSON、非对象根、缺 name/command 字段报错 |
 | `session.rs` | 4 | session 解析、损坏 JSON、空输入、缺失字段容错 |
 | `lsp/mod.rs` | 5 | 每语言默认命令与解析、root 解析（Rust 项目根 / C·TS 工作区根 / Cargo.toml 上溯 / 回退）、`initialize` 能力（含 `publishDiagnostics`） |
@@ -319,6 +329,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | `lsp/transport.rs` | 12 | 帧编解码、跨读分片、多消息、精确 Content-Length、缺失/非数字长度、空消息往返 |
 | `lsp/uri.rs` | 16 | Windows/Unix/UNC/verbatim 路径往返、百分号编解码、中文/emoji/空格、非法 scheme/转义 |
 | `lsp/cpp.rs` | 6 | PATH 查找顺序、根/`build` 数据库检测、生成受管 `.clangd`、数据库出现时移除、绝不覆盖用户 `.clangd`、`build/` 数据库不再生成回退 |
+| `git.rs` | 43 | `rev-parse` 根解析、status 双列解析与状态分类、暂存/取消暂存、Diff 双侧取回与二进制识别、提交、`log` 时间/相对时间/主体解析、commit 详情、路径转义（反引号解码）等 |
 
 前端无测试框架，以 `tsc`/`vite build` 与手工清单验证（见 `docs/features.md` §15）。
 
@@ -326,7 +337,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 
 ```bash
 cd src-tauri && cargo check     # Rust 类型检查
-cd src-tauri && cargo test      # Rust 单测（116 个，Windows 运行 115 个）
+cd src-tauri && cargo test      # Rust 单测（167 个，Windows 运行 166 个）
 pnpm build                      # TypeScript 检查 + Vite 构建
 pnpm tauri dev                  # 启动开发环境
 ```
