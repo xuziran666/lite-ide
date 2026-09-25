@@ -10,6 +10,10 @@ use crate::watcher::WorkspaceWatcher;
 
 pub struct AppState {
     workspace: Mutex<Option<PathBuf>>,
+    /// Cached `git rev-parse --show-toplevel` result for `workspace`. The outer
+    /// `Option` distinguishes "not looked up yet" from a cached "not a
+    /// repository" (`None`). Cleared whenever the workspace changes.
+    git_root: Mutex<Option<Option<PathBuf>>>,
     watcher: Mutex<Option<WorkspaceWatcher>>,
     terminals: Mutex<HashMap<u64, TerminalSession>>,
     /// Live language-server sessions, keyed by client-side language id
@@ -21,6 +25,7 @@ impl AppState {
     pub fn new() -> Self {
         Self {
             workspace: Mutex::new(None),
+            git_root: Mutex::new(None),
             watcher: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
             lsp: Mutex::new(HashMap::new()),
@@ -31,6 +36,10 @@ impl AppState {
         self.kill_all_terminals();
         // A new workspace never inherits the previous one's language servers.
         self.stop_all_lsp();
+        // The cached repository root belongs to the outgoing workspace.
+        if let Ok(mut guard) = self.git_root.lock() {
+            *guard = None;
+        }
         let mut guard = self
             .workspace
             .lock()
@@ -60,6 +69,21 @@ impl AppState {
             .lock()
             .map_err(|_| "workspace state is poisoned".to_string())?;
         Ok(guard.clone())
+    }
+
+    /// The cached repository root, or `None` when it has not been resolved yet.
+    pub fn cached_git_root(&self) -> Result<Option<Option<PathBuf>>, String> {
+        let guard = self
+            .git_root
+            .lock()
+            .map_err(|_| "git root state is poisoned".to_string())?;
+        Ok(guard.clone())
+    }
+
+    pub fn set_cached_git_root(&self, root: Option<PathBuf>) {
+        if let Ok(mut guard) = self.git_root.lock() {
+            *guard = Some(root);
+        }
     }
 
     pub fn set_terminal(&self, id: u64, session: TerminalSession) {

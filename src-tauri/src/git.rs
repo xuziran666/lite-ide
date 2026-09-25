@@ -7,7 +7,10 @@
 //! file names with non-ASCII characters are passed through as UTF-8 instead of
 //! being octal-escaped.
 
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 /// One changed file as reported by `git status --short`.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -133,10 +136,14 @@ pub fn parse_status(workspace: &Path) -> Result<Vec<GitFileStatus>, String> {
     Ok(parse_status_lines(&out.stdout))
 }
 
-/// The combined detect-and-list snapshot consumed by `git_status`.
-pub fn status_snapshot(workspace: &Path) -> Result<GitSnapshot, String> {
-    let root = find_repository_root(workspace)?;
-    let Some(root) = root else {
+/// The combined detect-and-list snapshot consumed by `git_status`. The
+/// repository root is passed in so callers can cache it across refreshes
+/// instead of re-running `git rev-parse` on every poll.
+pub fn status_snapshot(
+    workspace: &Path,
+    repository_root: Option<PathBuf>,
+) -> Result<GitSnapshot, String> {
+    let Some(root) = repository_root else {
         return Ok(GitSnapshot {
             repository_root: None,
             files: Vec::new(),
@@ -218,16 +225,72 @@ struct RawCommandOutput {
     stderr: Vec<u8>,
 }
 
+/// Upper bound for one `git` invocation. A stuck `git` (held index lock,
+/// credential prompt, unresponsive network share) would otherwise park the
+/// calling thread forever.
+const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often the supervising thread checks whether the child exited.
+const GIT_POLL: Duration = Duration::from_millis(20);
+/// How long to wait for the output readers to drain once the child is gone.
+const GIT_DRAIN: Duration = Duration::from_secs(5);
+
+/// Poll `child` until it exits or `timeout` elapses, killing it on timeout so
+/// a wedged Git process cannot block the caller indefinitely.
+fn wait_with_timeout(
+    child: &mut std::process::Child,
+    timeout: Duration,
+) -> Result<std::process::ExitStatus, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Git command timed out after {}s",
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(GIT_POLL);
+            }
+            Err(err) => return Err(format!("Failed to wait for git: {err}")),
+        }
+    }
+}
+
+/// Drain one child pipe on its own thread, handing the bytes back over a
+/// channel so the supervising `try_wait` loop is never blocked on a full pipe.
+fn drain_pipe<R: Read + Send + 'static>(mut pipe: Option<R>) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
+}
+
 /// Like `run_git`, but with raw byte output so binary blobs are not corrupted
 /// by a lossy UTF-8 decode.
+///
+/// Both pipes are drained on their own threads: a command producing more
+/// output than the OS pipe buffer holds would otherwise deadlock against the
+/// supervising `try_wait` loop.
 fn run_git_raw(workspace: &Path, args: &[&str]) -> Result<RawCommandOutput, String> {
-    let output = std::process::Command::new("git")
+    let mut child = std::process::Command::new("git")
         .arg("-C")
         .arg(git_dir(workspace))
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args)
-        .output()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
                 "Git executable not found".to_string()
@@ -235,11 +298,18 @@ fn run_git_raw(workspace: &Path, args: &[&str]) -> Result<RawCommandOutput, Stri
                 format!("Failed to run git: {err}")
             }
         })?;
+
+    let out_rx = drain_pipe(child.stdout.take());
+    let err_rx = drain_pipe(child.stderr.take());
+
+    let status = wait_with_timeout(&mut child, GIT_TIMEOUT)?;
+    let stdout = out_rx.recv_timeout(GIT_DRAIN).unwrap_or_default();
+    let stderr = err_rx.recv_timeout(GIT_DRAIN).unwrap_or_default();
     Ok(RawCommandOutput {
-        success: output.status.success(),
-        code: output.status.code(),
-        stdout: output.stdout,
-        stderr: output.stderr,
+        success: status.success(),
+        code: status.code(),
+        stdout,
+        stderr,
     })
 }
 

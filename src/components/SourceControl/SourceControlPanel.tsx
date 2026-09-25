@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { GitFileStatus } from "../../commands";
 import { gitCommit } from "../../commands";
 import { useGitStore } from "../../stores/gitStore";
@@ -246,16 +246,6 @@ function SourceControlPanel() {
   const [changesOpen, setChangesOpen] = useState(false);
   const [stagedOpen, setStagedOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
-
-  // Refresh once when the panel becomes visible (or on workspace change) so
-  // the shown status is current even if no file-system event arrived since
-  // the last load. The result lists are kept while `loading` to avoid flicker.
-  useEffect(() => {
-    if (!workspacePath) return;
-    const store = useGitStore.getState();
-    if (!store.loading) void store.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacePath]);
 
   // One refresh reloads the status, the staged list and the history together.
   const doRefresh = () => {

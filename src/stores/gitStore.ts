@@ -52,6 +52,12 @@ export const useGitStore = create<GitStore>((set, get) => {
   // generation are discarded so a slow load never overwrites a newer one.
   let refreshSeq = 0;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  // The currently running refresh, if any. A refresh requested while one is
+  // in flight only raises `pending` and joins the run below, so slow Git work
+  // can never stack up into an unbounded queue of concurrent `git status`
+  // invocations.
+  let inFlight: Promise<void> | null = null;
+  let pending = false;
 
   const clearTimer = () => {
     if (refreshTimer !== null) {
@@ -60,9 +66,7 @@ export const useGitStore = create<GitStore>((set, get) => {
     }
   };
 
-  const refresh = async () => {
-    const seq = ++refreshSeq;
-    clearTimer();
+  const runOnce = async (seq: number) => {
     set({ loading: true, error: null });
     try {
       const snapshot = await gitStatus();
@@ -89,6 +93,29 @@ export const useGitStore = create<GitStore>((set, get) => {
         loading: false,
         error: String(e),
       });
+    }
+  };
+
+  const refresh = async () => {
+    // Join the run already in progress; it will pick up `pending` itself and
+    // execute at most one follow-up, so the caller still observes fresh data.
+    if (inFlight) {
+      pending = true;
+      return inFlight;
+    }
+    clearTimer();
+    const run = (async () => {
+      do {
+        pending = false;
+        await runOnce(++refreshSeq);
+      } while (pending);
+    })();
+    inFlight = run;
+    try {
+      await run;
+    } finally {
+      // `clear()` may have detached this run; do not clobber its successor.
+      if (inFlight === run) inFlight = null;
     }
   };
 
@@ -132,6 +159,10 @@ export const useGitStore = create<GitStore>((set, get) => {
     clear: () => {
       ++refreshSeq;
       clearTimer();
+      // Detach the in-flight run: its result is already stale, and the next
+      // `refresh()` must be free to start one for the new workspace.
+      pending = false;
+      inFlight = null;
       set({
         isRepository: false,
         repositoryRoot: null,

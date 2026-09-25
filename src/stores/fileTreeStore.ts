@@ -204,8 +204,17 @@ export const useFileTreeStore = create<FileTreeStore>((set, get) => ({
   onFileSystemChanged: async (paths: string[]) => {
     const root = get().root;
     if (!root) return;
+    // A batch usually names many siblings (a checkout, a build writing into
+    // one directory). Reloading each changed path would re-read the same
+    // parent directory once per sibling, so collapse the batch to the set of
+    // directories that actually need re-reading.
+    const parents = new Set<string>();
     for (const p of paths) {
-      await get().refreshPath(p);
+      const parent = p === root.path ? p : dirname(p);
+      if (parent) parents.add(parent);
+    }
+    for (const parent of parents) {
+      await get().refreshPath(parent);
     }
   },
 
