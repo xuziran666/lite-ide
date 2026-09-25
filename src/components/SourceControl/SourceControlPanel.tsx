@@ -243,8 +243,8 @@ function SourceControlPanel() {
   const refresh = useGitStore((s) => s.refresh);
   const stageAll = useGitStore((s) => s.stageAll);
   const unstageAll = useGitStore((s) => s.unstageAll);
-  const [changesOpen, setChangesOpen] = useState(true);
-  const [stagedOpen, setStagedOpen] = useState(true);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [stagedOpen, setStagedOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
 
   // Refresh once when the panel becomes visible (or on workspace change) so
