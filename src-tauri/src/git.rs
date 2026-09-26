@@ -281,23 +281,34 @@ fn drain_pipe<R: Read + Send + 'static>(mut pipe: Option<R>) -> mpsc::Receiver<V
 /// output than the OS pipe buffer holds would otherwise deadlock against the
 /// supervising `try_wait` loop.
 fn run_git_raw(workspace: &Path, args: &[&str]) -> Result<RawCommandOutput, String> {
-    let mut child = std::process::Command::new("git")
-        .arg("-C")
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C")
         .arg(git_dir(workspace))
         .arg("-c")
         .arg("core.quotepath=false")
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                "Git executable not found".to_string()
-            } else {
-                format!("Failed to run git: {err}")
-            }
-        })?;
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // `git.exe` is a console-subsystem program, so Windows would allocate
+        // and briefly flash a console window for every invocation. This is the
+        // only way to run a console program from a windowed app without that
+        // flash, and it only affects process creation: stdout and stderr are
+        // still piped and captured exactly as before.
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    let mut child = cmd.spawn().map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            "Git executable not found".to_string()
+        } else {
+            format!("Failed to run git: {err}")
+        }
+    })?;
 
     let out_rx = drain_pipe(child.stdout.take());
     let err_rx = drain_pipe(child.stderr.take());
