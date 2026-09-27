@@ -56,7 +56,7 @@ pub struct LspStartResult {
 pub fn initialize_params(root_uri: &str, process_id: u32) -> Value {
     json!({
         "processId": process_id,
-        "clientInfo": { "name": "lite-ide", "version": "0.2.3" },
+        "clientInfo": { "name": "lite-ide", "version": "0.3.0" },
         "rootUri": root_uri,
         "workspaceFolders": [{
             "uri": root_uri,
