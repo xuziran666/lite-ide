@@ -1,6 +1,6 @@
 # lite-ide 架构说明
 
-> 版本 0.2.2 · 代码基线 `main@c4976a5`
+> 版本 0.2.3 · 代码基线 `main@2cec78c`
 
 ## 1. 技术栈与版本
 
@@ -176,7 +176,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 - 外部变更且本地非脏时，用 `suppressChange` 抑制回调再更新内容，避免误标脏；
 - 重命名时 `rekeyPath` 把旧模型内容迁移到新路径并保留脏状态；
 - 全局配置文件（`tasks.json`）以 `external` 标签打开，保存走 IPC `write_global_file`（命令白名单），不经过普通文件系统路径；
-- **只读外部文件**：`openExternalFile` 读取工作区外文件（`read_external_file`），以 `readOnly: true` 标签打开，`onChange` 回调为空（**从不置脏**），`save()` 直接返回 `false`，`onExternalChange` 跳过，关闭时不进入最近关闭历史，切换工作区随 `reset()` 关闭；编辑器参数通过订阅 `configStore` **按字段**热应用到活动 Monaco 实例（仅 `editor.theme` 变化时调用 `setTheme`，其余字段各自 `updateOptions`，不重建 Editor / Model）。
+- **只读外部文件**：`openExternalFile` 读取工作区外文件（`read_external_file`），以 `readOnly: true` 标签打开，`onChange` 回调为空（**从不置脏**），`save()` 直接返回 `false`，`onExternalChange` 跳过，关闭时不进入最近关闭历史，切换工作区随 `reset()` 关闭；编辑器参数通过订阅 `configStore` **按字段**热应用到活动 Monaco 实例（仅 `editor.theme` 变化时调用 `setTheme`，其余字段各自 `updateOptions`，不重建 Editor / Model）；`Ctrl/Cmd+滚轮` 缩放字号是**唯一旁路 store 的参数变更**（见 12）。
 
 ## 8. 文件系统安全边界
 
@@ -277,7 +277,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 
 | 配置 | 热应用 | 新会话 | 下次启动 | 需手动重启 |
 |---|---|---|---|---|
-| 编辑器参数（字体/连字/字号/制表符/换行/缩略图/行号/空白/行高亮/参考线/折叠/括号/滚动/光标） | ✅（按字段 `updateOptions`） | | | |
+| 编辑器参数（字体/连字/字号/制表符/换行/缩略图/行号/空白/行高亮/参考线/折叠/括号/滚动/光标） | ✅（按字段 `updateOptions`；字号经滚轮缩放时为手势内直传，收尾取整回 store） | | | |
 | Monaco 配色主题（`editor.theme`） | ✅（`setTheme`） | | | |
 | 主题（`general.theme`：dark/light/system） | ✅（`<html data-theme>`） | | | |
 | 自动保存（`files.autoSave`） | ✅ | | | |
@@ -287,6 +287,11 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | 关窗确认 | ✅ | | | |
 | 恢复上次文件夹 | | | ✅ | |
 | `tasks.json` 任务列表 | | | | ✅ |
+
+**编辑器 `Ctrl/Cmd+滚轮` 缩放（字号）走独立的两段式路径**，其余参数都是「改 store → 订阅者热应用」：
+
+1. **手势期间不碰 store**：每个滚轮事件只按 `deltaY` 比例累加到组件内的 `wheelFontSizeRef`（小数值），`requestAnimationFrame` 闸门保证每帧最多一次 `editor.updateOptions({ fontSize })`（Monaco 在字号缓存未命中时会重新做 41 个节点的字体测量，因此同帧多次变化只保留最后一次）；事件不产生 IPC、不写 `user.json`。
+2. **停止 150ms 后提交一次**：`Math.round` 并钳制回 8–40，再走正常 `updateEditor` 写回 store 与 `user.json`（后端 `font_size: u32`，小数不可持久化，故取整是强制的）。因此屏幕上的瞬时值与落盘值最多差 0.5px，且在同一次提交内对齐。
 
 ## 13. 任务系统
 

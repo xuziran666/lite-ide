@@ -408,7 +408,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[cfg(unix)]
-    use std::os::unix::fs::symlink_dir;
+    use std::os::unix::fs::symlink as symlink_dir;
     #[cfg(windows)]
     use std::os::windows::fs::symlink_dir;
 

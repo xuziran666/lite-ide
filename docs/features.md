@@ -1,6 +1,6 @@
 # lite-ide 功能汇总
 
-> 版本 0.2.2 · 代码基线 `main@c4976a5` · 最后更新 2026-09
+> 版本 0.2.3 · 代码基线 `main@2cec78c` · 最后更新 2026-09
 
 基于 Tauri v2 的轻量级跨平台代码编辑器，核心为**文件树**、**代码编辑器（Monaco）**、**内置终端（xterm.js + portable-pty）**、**任务/设置系统**，以及**项目导航**与**内置 LSP 客户端**。
 
@@ -23,7 +23,7 @@
 |---|---|---|
 | 工作区 | 输入路径或系统对话框选择、切换、启动自动恢复（可配置） | ✅ |
 | 文件树 | 懒加载、展开折叠、右键增删改、复制路径、外部变更自动刷新、跟随当前编辑文件 | ✅ |
-| 编辑器 | 多标签、脏标记、保存、关闭确认、外部变更处理、46 种扩展名高亮、编辑参数可配置 | ✅ |
+| 编辑器 | 多标签、脏标记、保存、关闭确认、外部变更处理、46 种扩展名高亮、编辑参数可配置、Ctrl/Cmd+滚轮无级缩放字号 | ✅ |
 | 终端 | 多标签真实 PTY、任务终端、默认 shell / 字体 / 字号可配置、Ctrl/Cmd+滚轮缩放、JetBrains 风格 Ctrl+C | ✅ |
 | 任务 | 全局 tasks.json、任务中心、变量展开与 Windows 路径归一化、专用任务终端 | ✅ |
 | 设置 | 通用/编辑器/文件/终端/任务/键盘快捷键 6 分区，user.json 读写（含 lsp 配置） | ✅ |
@@ -76,7 +76,7 @@
 - **按字段应用**：热应用是**按字段**下发的 —— 只有 `editor.theme` 变化才调用 `monaco.editor.setTheme`，其余字段各自通过 `editor.updateOptions({ 该字段 })` 单独更新，改一项不会重设主题或其它选项；全程不重建 Editor、不重建 Model，光标 / 选区 / 滚动位置 / 撤销栈 / LSP 会话均不受影响。
 - **配置项合法取值**（与 monaco-editor 0.56 的 `IEditorOptions` / `IGlobalEditorOptions` 完全一致，非法值由后端回退默认）：`lineNumbers` on / off / relative；`renderWhitespace` none / boundary / selection / all / trailing；`renderLineHighlight` none / gutter / line / all；`matchBrackets` always / never / near；`cursorStyle` line / block / underline / line-thin / block-outline / underline-thin；`cursorBlinking` blink / smooth / phase / expand / solid；`autoClosingBrackets` / `autoClosingQuotes` always / languageDefined / beforeWhitespace / never；`autoSurround` languageDefined / quotes / brackets / never；`formatOnPaste`、`formatOnType`、`trimAutoWhitespace`、`dragAndDrop`、`copyWithSyntaxHighlighting`、`guides.indentation`、`bracketPairColorization.enabled` 为布尔。
 - **`formatOnPaste` / `formatOnType` 只是 Monaco 开关**：能否真正格式化取决于当前语言是否存在 formatter（Monaco 内建的 JSON / CSS / HTML worker、Monaco TS/JS worker 的 on-type 格式化、或语言服务提供的 `documentFormattingProvider`）；没有 formatter 的语言不会产生可见效果 —— 本项目不自行实现 formatter，也不为此新增任何 LSP 能力。
-- **缩放与自动保存**：`Ctrl/Cmd + 滚轮` 在编辑器内缩放字号（8–40，可在设置关闭）；自动保存支持「编辑停止后延迟保存」「编辑器失焦保存」「窗口失焦保存」三个独立触发条件（设置中开关与设延迟）。
+- **缩放与自动保存**：`Ctrl/Cmd + 滚轮` 在编辑器内缩放字号（8–40，可在设置关闭）；**缩放是无级的**：有档滚轮一格仍为 1px，高精度滚轮/触控板按 `deltaY` 等比缩小步长（Monaco 的 `fontSize` 原生支持小数，字号直接以 `font-size: 14.2px` 下发），因此字形尺寸连续变化；行高由 Monaco 按 1.35×字号 推导后取整，纵向行网格仍每约 0.74px 跳 1px（与 VS Code 同源，不可消除）；自动保存支持「编辑停止后延迟保存」「编辑器失焦保存」「窗口失焦保存」三个独立触发条件（设置中开关与设延迟）。
 - **多标签**：点击切换、`×` 关闭、鼠标中键关闭、脏文件显示橙色圆点、标签保持固定宽度（超长省略）并支持滚轮横向滚动、激活标签自动滚入视野。
 - **保存**：`Ctrl/Cmd+S`；脏状态基于 Monaco `versionId` 与 `savedVersion` 比较（不是简单布尔标记），因此撤销回已保存内容时会自动取消脏标记。
 - **关闭脏标签**：弹出「保存 / 不保存 / 取消」三选一；保存失败时标签保持打开，避免丢失内容。
@@ -223,7 +223,7 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | 键盘快捷键 | 见下 | 立即生效 |
 
 - **键盘快捷键**：14 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`、`renameSymbol`、`findReferences`、`codeActions`、`formatDocument`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。（`F2`/`Shift+F12`/`Shift+Alt+F` 等默认值由后端下发，绕过“须含 Ctrl”的录制校验。）
-- **持久化**：所有设置在改动时即时写回 `user.json`（后端做边界钳制/空值回退/枚举白名单：非法 `wordWrap` 归 off，非法 `lineNumbers` / `renderWhitespace` / `renderLineHighlight` / `matchBrackets` / `cursorStyle` / `cursorBlinking` / `autoClosingBrackets` / `autoClosingQuotes` / `autoSurround` 各自回退默认值，空或纯空格的 `fontFamily` 回退默认字族）；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
+- **持久化**：设置修改默认即时持久化；编辑器 `Ctrl/Cmd+滚轮` 字号缩放在滚轮停止约 150ms 后持久化最终值（即时上屏，不逐个滚轮事件写盘）。手势期间用小数字号上屏，**收尾时先 `Math.round` 并钳制回 8–40 整数再落盘**，`user.json` 与后端 `u32` 字段始终只存整数，屏幕值与持久化值因此始终一致（回弹 ≤0.5px）。后端做边界钳制/空值回退/枚举白名单：非法 `wordWrap` 归 off，非法 `lineNumbers` / `renderWhitespace` / `renderLineHighlight` / `matchBrackets` / `cursorStyle` / `cursorBlinking` / `autoClosingBrackets` / `autoClosingQuotes` / `autoSurround` 各自回退默认值，空或纯空格的 `fontFamily` 回退默认字族；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
 - **user.json 结构**（camelCase）：
 
 ```json

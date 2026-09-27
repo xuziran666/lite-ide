@@ -112,9 +112,22 @@ export function changedMonacoOptions(
   return patch as MonacoEditorOptions;
 }
 
+/**
+ * How long the wheel gesture must stay idle before its final size is handed to
+ * the config store. The live size is already on screen, so this only turns
+ * "one `user.json` write per wheel event" into "one per gesture".
+ */
+const WHEEL_ZOOM_PERSIST_DELAY = 150;
+
 function Editor() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  // The in-flight Ctrl/Cmd + wheel size lives here instead of in the store, so
+  // a single wheel event never triggers a Zustand update, a Tauri IPC call or a
+  // `user.json` write. `null` means no gesture is in flight and the store is
+  // the source of truth again.
+  const wheelFontSizeRef = useRef<number | null>(null);
+  const wheelPersistTimerRef = useRef<number | undefined>(undefined);
   const activePath = useEditorStore((s) => s.activePath);
   const error = useEditorStore((s) => s.error);
   const externalNotice = useEditorStore((s) => s.externalNotice);
@@ -241,6 +254,10 @@ function Editor() {
   // Editor: Mouse Wheel Zoom. Resizes the Monaco font (8..40, step 1) on
   // Ctrl/Cmd + wheel. The listener is scoped to the editor host so the
   // Explorer / Terminal / Sidebar are unaffected and no page zoom happens.
+  //
+  // Live display and persistence are separate: every wheel event only calls
+  // `updateOptions` on this editor instance, and the final size is persisted
+  // through the normal `updateEditor` path once the gesture goes idle.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -251,13 +268,37 @@ function Editor() {
       e.stopPropagation();
       const store = useConfigStore.getState();
       if (!store.editor.mouseWheelZoom) return;
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      // The store still holds the size the gesture started from, so the next
+      // tick has to step from the live size to avoid repeating a value.
+      const current = wheelFontSizeRef.current ?? store.editor.fontSize;
       const step = e.deltaY > 0 ? -1 : 1;
-      const next = Math.min(40, Math.max(8, store.editor.fontSize + step));
-      if (next !== store.editor.fontSize) {
-        void store.updateEditor({ fontSize: next });
+      const next = Math.min(40, Math.max(8, current + step));
+      if (next === current) return;
+      wheelFontSizeRef.current = next;
+      // Immediate: this editor instance only — no store, no IPC, no layout()
+      // (Monaco re-measures the font on its own, and `automaticLayout` already
+      // owns the host box).
+      editor.updateOptions({ fontSize: next });
+
+      // Re-arm on every event, so a continuous gesture persists only once.
+      if (wheelPersistTimerRef.current !== undefined) {
+        window.clearTimeout(wheelPersistTimerRef.current);
       }
+      wheelPersistTimerRef.current = window.setTimeout(() => {
+        wheelPersistTimerRef.current = undefined;
+        const size = wheelFontSizeRef.current;
+        wheelFontSizeRef.current = null;
+        if (size === null) return;
+        void useConfigStore.getState().updateEditor({ fontSize: size });
+      }, WHEEL_ZOOM_PERSIST_DELAY);
     };
     host.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    // The pending timer is deliberately left running: it only touches the
+    // store, so tearing the editor down inside the idle window still persists
+    // the final size.
     return () =>
       host.removeEventListener("wheel", onWheel, { capture: true });
   }, []);
