@@ -3,7 +3,6 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import {
   terminalSpawn,
@@ -17,15 +16,7 @@ import {
 } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useConfigStore } from "../../stores/configStore";
-
-function toUint8Array(message: unknown): Uint8Array {
-  if (message instanceof Uint8Array) return message;
-  if (message instanceof ArrayBuffer) return new Uint8Array(message);
-  if (Array.isArray(message)) {
-    return Uint8Array.from(message.map(Number).filter(Number.isInteger));
-  }
-  return new Uint8Array();
-}
+import { toUint8Array } from "../../debug/debugTerminalOutput";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -426,6 +417,8 @@ function DebugTerminalInstance({
   const exited = useTerminalStore(
     (s) => s.terminals.find((t) => t.kind === "debug")?.exited ?? false,
   );
+  const debugSessionId = useTerminalStore((s) => s.debugSessionId);
+  const debugOutputRevision = useTerminalStore((s) => s.debugOutputRevision);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -455,25 +448,6 @@ function DebugTerminalInstance({
     term.onData((data) => {
       void terminalWrite(DEBUG_TERMINAL_ID, data).catch(() => undefined);
     });
-
-    let unlistenOutput: UnlistenFn | null = null;
-    let unlistenExit: UnlistenFn | null = null;
-    void (async () => {
-      unlistenOutput = await listen<{ id: number; data: unknown }>(
-        "debug-terminal-output",
-        ({ payload }) => {
-          if (payload.id !== DEBUG_TERMINAL_ID) return;
-          term.write(toUint8Array(payload.data));
-        },
-      );
-      unlistenExit = await listen<{ id: number }>(
-        "debug-terminal-exit",
-        ({ payload }) => {
-          if (payload.id !== DEBUG_TERMINAL_ID) return;
-          useTerminalStore.getState().markExited(DEBUG_TERMINAL_ID);
-        },
-      );
-    })();
 
     const fitAndReport = () => {
       requestAnimationFrame(() => {
@@ -518,14 +492,20 @@ function DebugTerminalInstance({
 
     return () => {
       unsubFont();
-      unlistenOutput?.();
-      unlistenExit?.();
       resizeObserver.disconnect();
       webgl?.dispose();
       term.dispose();
       termRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (debugSessionId === null || !termRef.current) return;
+    const output = useTerminalStore
+      .getState()
+      .consumeDebugOutput(debugSessionId);
+    if (output.length > 0) termRef.current.write(output);
+  }, [debugSessionId, debugOutputRevision]);
 
   useEffect(() => {
     if (!active) return;

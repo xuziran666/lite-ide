@@ -190,6 +190,7 @@ export interface DebugExitedMessage {
 export interface DebugStartResult {
   adapter: string;
   capabilities: DapCapabilities;
+  sessionId: number;
 }
 
 /** Narrowing helpers — DAP bodies are untyped JSON until read. */

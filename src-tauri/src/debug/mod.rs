@@ -43,6 +43,7 @@ pub const CLIENT_ID: &str = "lite-ide";
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebugStartResult {
+    pub session_id: u64,
     /// Display name of the adapter process, for logs and error messages.
     pub adapter: String,
     /// The `body.capabilities` object from the `initialize` response, so the

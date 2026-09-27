@@ -47,6 +47,7 @@ pub async fn debug_start(
 ) -> Result<DebugStartResult, String> {
     spawn_blocking(move || {
         let state = app.state::<AppState>();
+        let _start_guard = state.lock_debug_start();
         if state.workspace()?.is_none() {
             return Err("No workspace is open. Please open a folder first.".to_string());
         }
@@ -80,15 +81,22 @@ pub async fn debug_start(
         }
 
         let session = DebugSession::start(Some(app.clone()), &language, &argv)?;
-        session.request(
+        if let Err(err) = session.request(
             "setExceptionBreakpoints",
             serde_json::json!({ "filters": [] }),
-        )?;
+        ) {
+            session.abort();
+            return Err(err);
+        }
         // Fire and forget: the response only arrives once the debuggee first
         // stops, which can be never. See `DebugSession::send_request`.
-        session.send_request(request, arguments)?;
+        if let Err(err) = session.send_request(request, arguments) {
+            session.abort();
+            return Err(err);
+        }
 
         let result = DebugStartResult {
+            session_id: session.id(),
             adapter: session.label.clone(),
             capabilities: session.capabilities(),
         };
@@ -142,9 +150,6 @@ pub async fn debug_stop(app: AppHandle) -> Result<(), String> {
     spawn_blocking(move || {
         let state = app.state::<AppState>();
         state.stop_debug();
-        // Closing the debuggee's terminal pty ends its stdin; the terminal's
-        // already-printed output stays on screen.
-        state.kill_debug_terminal();
         Ok(())
     })
     .await

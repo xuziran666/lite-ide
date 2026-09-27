@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { DebugOutputBuffer } from "../debug/debugTerminalOutput";
 
 /** A single terminal session in the panel. The backend keys the live PTY by
  * `id`, so the same id survives restarts but is never reused after a close. */
@@ -27,11 +28,18 @@ interface TerminalStore {
   /** Bumped whenever the debug terminal should be revealed, so a layout effect
    *  can expand the panel and focus it without the store owning UI state. */
   revealSeq: number;
+  debugSessionId: number | null;
+  debugOutputRevision: number;
+  debugOutput: DebugOutputBuffer;
   create: (kind?: "normal" | "task") => number;
   close: (id: number) => void;
   select: (id: number) => void;
   markExited: (id: number) => void;
   markRunning: (id: number) => void;
+  setDebugSessionId: (sessionId: number | null) => void;
+  appendDebugOutput: (sessionId: number, data: Uint8Array) => void;
+  consumeDebugOutput: (sessionId: number) => Uint8Array;
+  clearDebugOutput: (sessionId: number) => void;
   /** Create the single Debug Terminal (or reset it for a new run) and select it. */
   ensureDebugTerminal: () => void;
   reset: () => void;
@@ -42,6 +50,9 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   activeId: null,
   nextId: 1,
   revealSeq: 0,
+  debugSessionId: null,
+  debugOutputRevision: 0,
+  debugOutput: new DebugOutputBuffer(),
 
   create: (kind = "normal") => {
     const id = get().nextId;
@@ -94,6 +105,26 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
     }));
   },
 
+  setDebugSessionId: (debugSessionId) => set({ debugSessionId }),
+
+  appendDebugOutput: (sessionId, data) => {
+    set((state) => {
+      state.debugOutput.append(sessionId, data);
+      return { debugOutputRevision: state.debugOutputRevision + 1 };
+    });
+  },
+
+  consumeDebugOutput: (sessionId) => {
+    return get().debugOutput.consume(sessionId);
+  },
+
+  clearDebugOutput: (sessionId) => {
+    set((state) => {
+      state.debugOutput.clear(sessionId);
+      return { debugOutputRevision: state.debugOutputRevision + 1 };
+    });
+  },
+
   ensureDebugTerminal: () => {
     set((s) => {
       const existing = s.terminals.find((t) => t.kind === "debug");
@@ -119,6 +150,14 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   },
 
   reset: () => {
-    set({ terminals: [], activeId: null, nextId: 1, revealSeq: 0 });
+    set({
+      terminals: [],
+      activeId: null,
+      nextId: 1,
+      revealSeq: 0,
+      debugSessionId: null,
+      debugOutputRevision: 0,
+      debugOutput: new DebugOutputBuffer(),
+    });
   },
 }));

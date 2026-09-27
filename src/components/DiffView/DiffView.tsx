@@ -6,7 +6,7 @@ import { languageForPath } from "../../utils/language";
 import {
   changedMonacoOptions,
   monacoOptions,
-} from "../Editor/Editor";
+} from "../Editor/monacoOptions";
 
 /** A model for one side of the diff. The `diff` scheme URI keeps these models
  *  out of the file modelStore entirely, so a diff can never affect an open

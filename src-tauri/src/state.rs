@@ -26,10 +26,12 @@ pub struct AppState {
     /// starting a second one is a stop-then-start rather than a parallel set of
     /// adapters.
     debug: Mutex<Option<Arc<DebugSession>>>,
+    debug_start: Mutex<()>,
     /// The id under which the debuggee's terminal pty is registered in
     /// `terminals`, when the adapter asked to run the program in a terminal
     /// (`runInTerminal`). `None` when the current session has no terminal.
     debug_terminal: Mutex<Option<u64>>,
+    debug_terminal_owner: Mutex<Option<u64>>,
 }
 
 impl AppState {
@@ -41,7 +43,9 @@ impl AppState {
             terminals: Mutex::new(HashMap::new()),
             lsp: Mutex::new(HashMap::new()),
             debug: Mutex::new(None),
+            debug_start: Mutex::new(()),
             debug_terminal: Mutex::new(None),
+            debug_terminal_owner: Mutex::new(None),
         }
     }
 
@@ -195,6 +199,12 @@ impl AppState {
             .map_err(|_| "debug state is poisoned".to_string())
     }
 
+    pub fn lock_debug_start(&self) -> MutexGuard<'_, ()> {
+        self.debug_start
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Store (or clear, when `session` is `None`) the single debug session.
     pub fn set_debug(&self, session: Option<Arc<DebugSession>>) {
         let mut guard = self
@@ -241,17 +251,44 @@ impl AppState {
     }
 
     /// Remember the id the debuggee's terminal pty is registered under.
-    pub fn set_debug_terminal(&self, id: u64) {
+    pub fn set_debug_terminal(&self, id: u64, owner: u64) {
         *self
             .debug_terminal
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(id);
+        *self
+            .debug_terminal_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(owner);
     }
 
     /// Kill the debuggee's terminal pty (explicit Stop, session finalization,
     /// workspace change). Closing the pty is what closes the debuggee's stdin;
     /// the already-printed output stays in the frontend's xterm buffer.
     pub fn kill_debug_terminal(&self) {
+        let owner = self
+            .debug_terminal_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if owner.is_none() {
+            return;
+        }
+        self.kill_debug_terminal_owned();
+    }
+
+    pub fn kill_debug_terminal_if_same(&self, owner: u64) {
+        let same = self
+            .debug_terminal_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some_and(|current| current == owner);
+        if same {
+            self.kill_debug_terminal_owned();
+        }
+    }
+
+    fn kill_debug_terminal_owned(&self) {
         let id = self
             .debug_terminal
             .lock()
@@ -260,5 +297,9 @@ impl AppState {
         if let Some(id) = id {
             self.kill_terminal(id);
         }
+        *self
+            .debug_terminal_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }

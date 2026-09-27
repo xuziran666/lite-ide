@@ -20,6 +20,7 @@ import type {
 import { breakpointRequest } from "./stateMachine";
 import type { DebugEvent } from "./stateMachine";
 import { fileKey } from "../utils/pathIdentity";
+import { toUint8Array } from "./debugTerminalOutput";
 
 /**
  * Driving one debug session: sending requests, and turning the adapter's event
@@ -51,10 +52,16 @@ import { fileKey } from "../utils/pathIdentity";
 let unlistenEvent: UnlistenFn | null = null;
 let unlistenExited: UnlistenFn | null = null;
 let unlistenTerminal: UnlistenFn | null = null;
+let unlistenDebugOutput: UnlistenFn | null = null;
+let unlistenDebugExit: UnlistenFn | null = null;
 let subscriptionsReady: Promise<void> | null = null;
+let activeSessionId: number | null = null;
+const staleSessionIds = new Set<number>();
+let queuedEvents: Array<{ sessionId: number; event: string; body: unknown }> = [];
 
 const dispatch = (event: DebugEvent): void =>
   useDebugStore.getState().dispatch(event);
+let unlistenError: UnlistenFn | null = null;
 
 const session = () => useDebugStore.getState().session;
 
@@ -78,20 +85,60 @@ export function ensureDebugSubscriptions(): Promise<void> {
       unlistenEvent = await listen<{ event: string; body: unknown }>(
         "debug-event",
         ({ payload }) => {
-          void handleEvent(payload.event, payload.body);
+          const event = payload as typeof payload & { sessionId: number };
+          if (activeSessionId === null) {
+            if (session().status === "starting") queuedEvents.push(event);
+            return;
+          }
+          if (event.sessionId !== activeSessionId) return;
+          void handleEvent(event.event, event.body, event.sessionId);
         },
       );
+      unlistenError = await listen<{ sessionId: number; message: string }>(
+        "debug-error",
+        ({ payload }) => {
+          if (payload.sessionId !== activeSessionId) return;
+          dispatch({ kind: "error", message: payload.message });
+          useUiStore.getState().showToast(payload.message, "error");
+        },
+      );
+      unlistenDebugOutput = await listen<{
+        id: number;
+        sessionId: number;
+        data: unknown;
+      }>("debug-terminal-output", ({ payload }) => {
+        if (staleSessionIds.has(payload.sessionId)) return;
+        useTerminalStore
+          .getState()
+          .appendDebugOutput(payload.sessionId, toUint8Array(payload.data));
+      });
+      unlistenDebugExit = await listen<{
+        id: number;
+        sessionId: number;
+      }>("debug-terminal-exit", ({ payload }) => {
+        // Keep already-buffered bytes until xterm consumes them. The PTY
+        // flusher sends the final empty chunk after its pending bytes, but
+        // Tauri event delivery can still let the exit event reach this
+        // listener before React mounts the terminal.
+        staleSessionIds.add(payload.sessionId);
+        if (payload.sessionId === activeSessionId) {
+          useTerminalStore.getState().markExited(payload.id);
+        }
+      });
       unlistenExited = await listen<{ message: string }>(
         "debug-exited",
         ({ payload }) => {
+          const event = payload as typeof payload & { sessionId: number };
+          if (event.sessionId !== activeSessionId) return;
           dispatch({ kind: "adapterExited", message: payload.message });
         },
       );
       // The adapter asked us to run the debuggee in a terminal. The tab is
       // created on F5 already; this makes it idempotent for any other path.
-      unlistenTerminal = await listen<{ id: number }>(
+      unlistenTerminal = await listen<{ id: number; sessionId: number }>(
         "debug-terminal-opened",
-        () => {
+        ({ payload }) => {
+          if (staleSessionIds.has(payload.sessionId)) return;
           useTerminalStore.getState().ensureDebugTerminal();
         },
       );
@@ -103,19 +150,33 @@ export function ensureDebugSubscriptions(): Promise<void> {
 export function disposeDebugSubscriptions(): void {
   unlistenEvent?.();
   unlistenExited?.();
+  unlistenError?.();
+  unlistenDebugOutput?.();
+  unlistenDebugExit?.();
   unlistenTerminal?.();
   unlistenEvent = null;
   unlistenExited = null;
+  unlistenError = null;
+  unlistenDebugOutput = null;
+  unlistenDebugExit = null;
   unlistenTerminal = null;
   subscriptionsReady = null;
+  activeSessionId = null;
+  staleSessionIds.clear();
+  queuedEvents = [];
 }
 
 /** Route one DAP event. Unknown events are ignored by design. */
-async function handleEvent(event: string, raw: unknown): Promise<void> {
+async function handleEvent(
+  event: string,
+  raw: unknown,
+  sessionId: number,
+): Promise<void> {
+  if (sessionId !== activeSessionId) return;
   const body = asRecord(raw) ?? {};
   switch (event) {
     case "initialized":
-      await onInitialized();
+      await onInitialized(sessionId);
       return;
 
     case "stopped": {
@@ -180,12 +241,14 @@ async function handleEvent(event: string, raw: unknown): Promise<void> {
  * are configured. Only after this does the program actually start, so a
  * breakpoint on line 5 is already in place when `main` runs.
  */
-async function onInitialized(): Promise<void> {
+async function onInitialized(sessionId: number): Promise<void> {
+  if (sessionId !== activeSessionId) return;
   const debug = useDebugStore.getState();
   try {
     await debug.syncAllBreakpoints((args) =>
       debugRequest("setBreakpoints", args),
     );
+    if (sessionId !== activeSessionId) return;
     await debugRequest("configurationDone", {});
   } catch (err) {
     useUiStore
@@ -420,6 +483,13 @@ export async function startDebugging(
   const configured = debugLaunchFor(language);
   const request: DebugRequestKind = override ?? requestKindOf(configured);
   dispatch({ kind: "startRequested", language });
+  if (activeSessionId !== null) {
+    staleSessionIds.add(activeSessionId);
+    useTerminalStore.getState().clearDebugOutput(activeSessionId);
+  }
+  activeSessionId = null;
+  useTerminalStore.getState().setDebugSessionId(null);
+  queuedEvents = [];
   await ensureDebugSubscriptions();
 
   const adapter = debugAdapterFor(language);
@@ -445,11 +515,21 @@ export async function startDebugging(
 
   try {
     const result = await debugStart(language, adapter, launch, request);
+    activeSessionId = result.sessionId;
+    staleSessionIds.delete(result.sessionId);
+    useTerminalStore.getState().setDebugSessionId(result.sessionId);
     dispatch({
       kind: "started",
       adapter: result.adapter,
       capabilities: result.capabilities,
     });
+    const pending = queuedEvents;
+    queuedEvents = [];
+    for (const event of pending) {
+      if (event.sessionId === activeSessionId) {
+        void handleEvent(event.event, event.body, event.sessionId);
+      }
+    }
   } catch (err) {
     const message = String(err);
     dispatch({ kind: "startFailed", error: message });
@@ -531,6 +611,13 @@ export async function stopSession(): Promise<void> {
   } catch (err) {
     useUiStore.getState().showToast(`停止调试失败: ${String(err)}`, "error");
   }
+  if (activeSessionId !== null) {
+    staleSessionIds.add(activeSessionId);
+    useTerminalStore.getState().clearDebugOutput(activeSessionId);
+  }
+  activeSessionId = null;
+  useTerminalStore.getState().setDebugSessionId(null);
+  queuedEvents = [];
   dispatch({ kind: "reset" });
 }
 

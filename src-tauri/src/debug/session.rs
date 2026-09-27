@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -54,9 +54,13 @@ const EXIT_GRACE: Duration = Duration::from_millis(300);
 /// Bounded cap so the decoder buffer cannot grow without limit.
 const MAX_BUFFERED_READ: usize = 16 * 1024 * 1024;
 
+static NEXT_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
 /// One DAP event forwarded to the frontend.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DebugEvent {
+    pub session_id: u64,
     /// The DAP event name (`initialized`, `stopped`, `continued`, ...).
     pub event: String,
     /// The raw `body`, forwarded verbatim so the frontend can add support for a
@@ -112,6 +116,7 @@ impl PendingRequests {
 
 /// A live connection to a debug adapter over stdio.
 pub struct DebugSession {
+    pub session_id: u64,
     /// `None` in tests: the session then runs the protocol without emitting.
     app: Option<AppHandle>,
     /// Human-readable adapter name, used in log and error messages.
@@ -126,6 +131,7 @@ pub struct DebugSession {
     seq: SeqCounter,
     pending: Arc<PendingRequests>,
     running: AtomicBool,
+    stopping: AtomicBool,
     /// Set once the adapter reports `terminated`: the debuggee is gone and this
     /// session can never be reused, even though the adapter process may still be
     /// alive waiting for `disconnect`.
@@ -150,6 +156,9 @@ impl DebugSession {
         language: &str,
         adapter: &[String],
     ) -> Result<Arc<Self>, String> {
+        if adapter.is_empty() {
+            return Err("Debug Adapter 命令为空".to_string());
+        }
         let mut cmd = Command::new(&adapter[0]);
         cmd.args(&adapter[1..])
             .stdin(Stdio::piped())
@@ -165,14 +174,22 @@ impl DebugSession {
         let mut child = cmd
             .spawn()
             .map_err(|err| format!("无法启动 Debug Adapter {}: {err}", adapter[0]))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "无法取得 Debug Adapter stdin".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "无法取得 Debug Adapter stdout".to_string())?;
+        let stdin = match child.stdin.take() {
+            Some(stdin) => stdin,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("无法取得 Debug Adapter stdin".to_string());
+            }
+        };
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("无法取得 Debug Adapter stdout".to_string());
+            }
+        };
         let stderr = child.stderr.take();
 
         let label = adapter[0]
@@ -187,6 +204,7 @@ impl DebugSession {
         }
 
         let session = Arc::new(Self {
+            session_id: NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed),
             app,
             language: language.to_string(),
             label,
@@ -196,6 +214,7 @@ impl DebugSession {
             seq: SeqCounter::new(),
             pending: Arc::new(PendingRequests::new()),
             running: AtomicBool::new(true),
+            stopping: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             initialized: Arc::new((Mutex::new(false), Condvar::new())),
             debug_terminal: Mutex::new(None),
@@ -206,10 +225,16 @@ impl DebugSession {
             move || reader_loop(session, stdout)
         });
 
-        let initialize = session.request(
+        let initialize = match session.request(
             "initialize",
             crate::debug::initialize_arguments(language),
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(err) => {
+                session.abort();
+                return Err(err);
+            }
+        };
         if let Some(capabilities) = initialize.get("capabilities") {
             let mut guard = session
                 .capabilities
@@ -233,6 +258,10 @@ impl DebugSession {
         self.finished.load(Ordering::SeqCst)
     }
 
+    pub fn id(&self) -> u64 {
+        self.session_id
+    }
+
     /// The adapter capabilities from the `initialize` response.
     pub fn capabilities(&self) -> Value {
         self.capabilities
@@ -251,12 +280,19 @@ impl DebugSession {
     fn run_in_terminal(&self, arguments: &Value) -> Result<Value, String> {
         let spec = crate::debug::parse_run_in_terminal(arguments)?;
         let id = crate::terminal::DEBUG_TERMINAL_ID;
+        let session_id = self.session_id;
         let sink: crate::terminal::OutputSink = if let Some(app) = self.app.clone() {
             Arc::new(move |data: Vec<u8>| {
                 if data.is_empty() {
-                    let _ = app.emit("debug-terminal-exit", json!({ "id": id }));
+                    let _ = app.emit(
+                        "debug-terminal-exit",
+                        json!({ "id": id, "sessionId": session_id }),
+                    );
                 } else {
-                    let _ = app.emit("debug-terminal-output", json!({ "id": id, "data": data }));
+                    let _ = app.emit(
+                        "debug-terminal-output",
+                        json!({ "id": id, "sessionId": session_id, "data": data }),
+                    );
                 }
             })
         } else {
@@ -281,9 +317,12 @@ impl DebugSession {
         if let Some(app) = self.app.as_ref() {
             if let Some(state) = app.try_state::<crate::state::AppState>() {
                 state.set_terminal(id, terminal);
-                state.set_debug_terminal(id);
+                state.set_debug_terminal(id, self.id());
             }
-            let _ = app.emit("debug-terminal-opened", json!({ "id": id }));
+            let _ = app.emit(
+                "debug-terminal-opened",
+                json!({ "id": id, "sessionId": self.session_id }),
+            );
         } else {
             let mut guard = self
                 .debug_terminal
@@ -363,6 +402,7 @@ impl DebugSession {
     /// Graceful stop: `disconnect` (terminating the debuggee), a short grace
     /// period, then a forced kill so no orphan survives on Windows.
     pub fn shutdown(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
         // The `disconnect` response is deliberately ignored: an adapter that is
         // already wedged must not block IDE shutdown.
         let _ = self.request_timeout(
@@ -382,6 +422,14 @@ impl DebugSession {
             }
             std::thread::sleep(Duration::from_millis(25));
         }
+        self.force_kill();
+    }
+
+    /// Abort a session that never reached AppState ownership.
+    pub fn abort(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        self.running.store(false, Ordering::SeqCst);
+        self.pending.fail_all("Debug session 已停止");
         self.force_kill();
     }
 
@@ -424,7 +472,7 @@ impl DebugSession {
     fn mark_failed(&self, message: &str) {
         let was_running = self.running.swap(false, Ordering::SeqCst);
         self.pending.fail_all(message);
-        if was_running {
+        if was_running && !self.stopping.load(Ordering::SeqCst) {
             self.emit_exit(message);
         }
     }
@@ -488,14 +536,34 @@ fn write(&self, message: &Value) -> Result<(), String> {
         let Some(app) = self.app.as_ref() else {
             return;
         };
-        let _ = app.emit("debug-event", DebugEvent { event, body });
+        let _ = app.emit(
+            "debug-event",
+            DebugEvent {
+                session_id: self.session_id,
+                event,
+                body,
+            },
+        );
     }
 
     fn emit_exit(&self, message: &str) {
         let Some(app) = self.app.as_ref() else {
             return;
         };
-        let _ = app.emit("debug-exited", json!({ "message": message }));
+        let _ = app.emit(
+            "debug-exited",
+            json!({ "sessionId": self.session_id, "message": message }),
+        );
+    }
+
+    fn emit_error(&self, message: &str) {
+        let Some(app) = self.app.as_ref() else {
+            return;
+        };
+        let _ = app.emit(
+            "debug-error",
+            json!({ "sessionId": self.session_id, "message": message }),
+        );
     }
 }
 
@@ -546,7 +614,7 @@ fn release_session(session: &Arc<DebugSession>) {
             // Close the debuggee's terminal pty too: the session is over, so
             // its stdin must not stay open (the printed output is retained by
             // the frontend's xterm).
-            state.kill_debug_terminal();
+            state.kill_debug_terminal_if_same(session.id());
         }
     }
 }
@@ -565,6 +633,7 @@ fn release_session(session: &Arc<DebugSession>) {
 ///   waits for the `disconnect` response, and this runs on the very reader
 ///   thread that would have to read it.
 fn finish_session(session: &Arc<DebugSession>) {
+    session.stopping.store(true, Ordering::SeqCst);
     session.running.store(false, Ordering::SeqCst);
     session.finished.store(true, Ordering::SeqCst);
     session.pending.fail_all("Debug session 已结束");
@@ -677,10 +746,12 @@ fn handle_incoming(session: &Arc<DebugSession>, msg: &Value) {
             // the launch is lost.
             None => {
                 if !success {
-                    eprintln!(
-                        "[debug] unclaimed response: {}",
-                        failure_text(&command, &message, &body)
-                    );
+                    let error = failure_text(&command, &message, &body);
+                    eprintln!("[debug] unclaimed response: {error}");
+                    session.emit_error(&error);
+                    if command == "launch" || command == "attach" {
+                        finish_session(session);
+                    }
                 }
             }
         },
@@ -705,24 +776,24 @@ fn handle_incoming(session: &Arc<DebugSession>, msg: &Value) {
             let _ = session.write(&reply);
         }
         Incoming::Event { event, body } => {
-            let terminated = event == "terminated";
+            let terminated = event == "terminated" || event == "exited";
             if event == "initialized" {
                 let (lock, cvar) = &*session.initialized;
                 *lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
                 cvar.notify_all();
             }
             session.emit_event(event, body);
-            // `terminated` is the protocol's "this session is over" signal. The
-            // adapter may still be alive, so the session finalizes itself here
+            // `terminated` and `exited` both end this single launch/attach
+            // session. The adapter may still be alive, so finalize it here
             // instead of leaving `AppState` holding a session that blocks the
-            // next start. `exited` is deliberately *not* used for this: a program
-            // can exit while the adapter stays usable for a restart.
+            // next start.
             if terminated {
                 finish_session(session);
             }
         }
         Incoming::Invalid => {}
     }
+
 }
 
 #[cfg(test)]
@@ -809,6 +880,7 @@ mod tests {
     /// routing without spawning anything.
     fn fake_session(pending: &Arc<PendingRequests>) -> Arc<DebugSession> {
         Arc::new(DebugSession {
+            session_id: 0,
             app: None,
             label: "fake".to_string(),
             language: "test".to_string(),
@@ -818,6 +890,7 @@ mod tests {
             seq: SeqCounter::new(),
             pending: Arc::clone(pending),
             running: AtomicBool::new(true),
+            stopping: AtomicBool::new(false),
             finished: AtomicBool::new(false),
             initialized: Arc::new((Mutex::new(false), Condvar::new())),
             debug_terminal: Mutex::new(None),
@@ -843,7 +916,7 @@ mod tests {
     }
 
     #[test]
-    fn exited_alone_does_not_finish_the_session() {
+    fn exited_alone_finishes_the_session() {
         let pending = Arc::new(PendingRequests::new());
         let session = fake_session(&pending);
         handle_incoming(
@@ -851,9 +924,9 @@ mod tests {
             &json!({"seq": 1, "type": "event", "event": "exited", "body": {"exitCode": 0}}),
         );
         assert!(
-            !session.is_finished(),
-            "exited is not the end of the session; the adapter may still be usable"
+            session.is_finished(),
+            "exited ends a single debug session"
         );
-        assert!(session.is_running());
+        assert!(!session.is_running());
     }
 }
