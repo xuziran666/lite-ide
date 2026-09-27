@@ -1,8 +1,8 @@
 # lite-ide 功能汇总
 
-> 版本 0.2.3 · 代码基线 `main@2cec78c` · 最后更新 2026-09
+> 版本 0.2.3 · 代码基线 `main@83eaab0` · 最后更新 2026-09
 
-基于 Tauri v2 的轻量级跨平台代码编辑器，核心为**文件树**、**代码编辑器（Monaco）**、**内置终端（xterm.js + portable-pty）**、**任务/设置系统**，以及**项目导航**与**内置 LSP 客户端**。
+基于 Tauri v2 的轻量级跨平台代码编辑器，核心为**文件树**、**代码编辑器（Monaco）**、**内置终端（xterm.js + portable-pty）**、**任务/设置系统**，以及**项目导航**、**内置 LSP 客户端**、**源代码管理（Git）**与**内置 DAP 调试客户端**。
 
 ## 1. 技术栈
 
@@ -16,6 +16,7 @@
 | 后端能力 | notify（文件监听）、portable-pty（伪终端）、tauri-plugin-dialog（目录选择）、regex（全局搜索） | 8.2 / 0.9 / 2 / 1 |
 | 语言服务器（外部，从 PATH 查找） | rust-analyzer / clangd / typescript-language-server | — |
 | 源代码管理 | 系统 Git CLI（从 PATH 查找，`rev-parse` / `status --short` / `add` / `restore --staged` / `show` / `commit` / `log`） | — |
+| 调试 | 自建 DAP 客户端 + 外部调试适配器（从 PATH 查找，在 `user.json` 的 `debug.adapters.<languageId>` 中配置，如 `lldb-dap`） | — |
 
 ## 2. 功能总览
 
@@ -26,15 +27,16 @@
 | 编辑器 | 多标签、脏标记、保存、关闭确认、外部变更处理、46 种扩展名高亮、编辑参数可配置、Ctrl/Cmd+滚轮无级缩放字号 | ✅ |
 | 终端 | 多标签真实 PTY、任务终端、默认 shell / 字体 / 字号可配置、Ctrl/Cmd+滚轮缩放、JetBrains 风格 Ctrl+C | ✅ |
 | 任务 | 全局 tasks.json、任务中心、变量展开与 Windows 路径归一化、专用任务终端 | ✅ |
-| 设置 | 通用/编辑器/文件/终端/任务/键盘快捷键 6 分区，user.json 读写（含 lsp 配置） | ✅ |
+| 设置 | 通用/编辑器/文件/终端/任务/调试/键盘快捷键 **7 分区**，user.json 读写（含 lsp / debug 配置） | ✅ |
 | 项目导航 | Quick Open（Ctrl+P）、全局搜索（Ctrl+Shift+F）、右侧栏（搜索/引用/大纲/问题）、源代码管理在左侧主栏 | ✅ |
 | 语言服务 | 内置 LSP 客户端：Rust（rust-analyzer）、C/C++（clangd）、TS/JS（typescript-language-server）：诊断/补全/悬停/定义/大纲/引用/重命名/签名帮助/代码操作/格式化、Ctrl+左键跳转 | ✅ |
 | 源代码管理 | 基于系统 Git CLI：仓库检测、更改/已暂存更改列表、暂存/取消暂存（单文件与全部）、单文件 Diff 预览（HEAD/索引/工作区/空 任意两侧）、提交（Commit）、提交历史（分页 + 提交文件树 + 提交 Diff）、文件监听自动刷新 | ✅ |
-| 布局 | 三栏拖拽 + 左侧主栏（文件树/源代码管理/任务）、右侧栏开关、三个布局切换按钮、文件树/终端折叠、底部状态栏、设置页覆盖中心区 | ✅ |
+| 布局 | 三栏拖拽 + 左侧主栏（文件树/源代码管理/任务/运行和调试）、右侧栏开关、三个布局切换按钮、文件树/终端折叠、底部状态栏、设置页覆盖中心区 | ✅ |
 | 窗口 | **自定义标题栏**（`decorations:false`，自绘最小化/最大化/关闭 + 拖拽区、双击最大化）、最小尺寸、标题跟随工作区、关窗未保存保护（可配置）、应用图标为项目 Logo | ✅ |
 | 主题 | **暗色 / 亮色 / 跟随系统**（`--vo-*` 设计 Token，`<html data-theme>`）；Monaco 配色主题独立可选 | ✅ |
 | 自动保存 | After Delay / On Focus Change / On Window Change 三条件独立（`Off` 互斥），延迟可设 | ✅ |
-| 命令面板 / 调试 | — | ❌ 未实现 |
+| 调试 | 内置 DAP 客户端：装订线断点（按工作区保留、已绑定/未解析区分）、F5 启动·继续、单步（跳过/进入/跳出）、调用堆栈与线程切换、变量（可展开）、Debug Terminal（交互式 stdin）、启动或附加、适配器与参数全部由 user.json 配置 | ✅ |
+| 命令面板 | — | ❌ 未实现 |
 
 ## 3. 工作区管理
 
@@ -102,6 +104,7 @@
   - `Ctrl+V`、`Ctrl+Shift+C` 等其余组合键行为不变。
 - **工具栏**：清屏、折叠；进程退出后显示「进程已退出」与「重启」按钮（不自动重启）。
 - **生命周期**：重启终端、切换工作区、关闭应用都会结束旧会话；Windows 下用 `taskkill /PID <pid> /T /F` 清理整棵进程树。
+- **Debug 终端（调试专用）**：启动调试时自动出现并聚焦固定标签「Debug」（保留 id `1000000`），PTY 里跑的是被调试进程而不是 shell，输入/输出即程序的 stdin/stdout（交互式 `cin >> n` 可用）；详见 §16.3。
 
 ## 7. 任务系统
 
@@ -220,10 +223,11 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | 文件 | **自动保存**：`Off` / After Delay / On Focus Change / On Window Change，延迟可设（100–60000ms） | 立即生效 |
 | 终端 | 默认 Shell（下拉，含 `auto` 与探测到的壳）、字体族、字号（8–40，终端内 `Ctrl/Cmd+滚轮` 缩放、可在设置关闭） | 默认 Shell 新终端会话（spawn 时）；字体/字号与缩放开关**立即热应用** |
 | 任务 | 打开 tasks.json 编辑全局任务 | 保存后重启应用 |
+| 调试 | 打开 user.json 编辑调试适配器与启动参数（`debug.adapters` / `debug.launch`，刻意不提供表单，见 §16.1） | 保存后重新启动调试即生效 |
 | 键盘快捷键 | 见下 | 立即生效 |
 
-- **键盘快捷键**：14 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`、`renameSymbol`、`findReferences`、`codeActions`、`formatDocument`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。（`F2`/`Shift+F12`/`Shift+Alt+F` 等默认值由后端下发，绕过“须含 Ctrl”的录制校验。）
-- **持久化**：设置修改默认即时持久化；编辑器 `Ctrl/Cmd+滚轮` 字号缩放在滚轮停止约 150ms 后持久化最终值（即时上屏，不逐个滚轮事件写盘）。手势期间用小数字号上屏，**收尾时先 `Math.round` 并钳制回 8–40 整数再落盘**，`user.json` 与后端 `u32` 字段始终只存整数，屏幕值与持久化值因此始终一致（回弹 ≤0.5px）。后端做边界钳制/空值回退/枚举白名单：非法 `wordWrap` 归 off，非法 `lineNumbers` / `renderWhitespace` / `renderLineHighlight` / `matchBrackets` / `cursorStyle` / `cursorBlinking` / `autoClosingBrackets` / `autoClosingQuotes` / `autoSurround` 各自回退默认值，空或纯空格的 `fontFamily` 回退默认字族；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略。
+- **键盘快捷键**：21 个动作可录制重绑（`toggleExplorer`、`toggleTerminal`、`newTerminal`、`closeEditorTab`、`restoreClosedTab`、`nextEditorTab`、`previousEditorTab`、`openTaskCenter`、`quickOpen`、`globalSearch`、`renameSymbol`、`findReferences`、`codeActions`、`formatDocument`、`signatureHelp`、`deleteLine`、`debugStartContinue`、`debugStepOver`、`debugStepInto`、`debugStepOut`、`debugStop`）。录制规则：组合键须含 Ctrl/Meta、不得含 Alt（**例外**：调试类动作允许裸功能键，即 `BARE_FUNCTION_KEY_ACTIONS` 中的 5 个，默认 `F5`/`F10`/`F11`/`Shift+F11`/`Shift+F5`）、支持 `Ctrl+Ctrl` 双击（仅 `openTaskCenter` 可用）；跨动作重复检测（提示占用方）；`Esc` 取消录制。（`F2`/`Shift+F12`/`Shift+Alt+F` 等默认值由后端下发，绕过“须含 Ctrl”的录制校验。）
+- **持久化**：设置修改默认即时持久化；编辑器 `Ctrl/Cmd+滚轮` 字号缩放在滚轮停止约 150ms 后持久化最终值（即时上屏，不逐个滚轮事件写盘）。手势期间用小数字号上屏，**收尾时先 `Math.round` 并钳制回 8–40 整数再落盘**，`user.json` 与后端 `u32` 字段始终只存整数，屏幕值与持久化值因此始终一致（回弹 ≤0.5px）。后端做边界钳制/空值回退/枚举白名单：非法 `wordWrap` 归 off，非法 `lineNumbers` / `renderWhitespace` / `renderLineHighlight` / `matchBrackets` / `cursorStyle` / `cursorBlinking` / `autoClosingBrackets` / `autoClosingQuotes` / `autoSurround` 各自回退默认值，空或纯空格的 `fontFamily` 回退默认字族；`user.json` 缺失用默认值、损坏时用默认值并 toast 提示，绝不阻塞启动。keybindings 中未知动作被忽略；`debug.adapters` 的键名统一小写、空白 `command` 的条目被丢弃，`debug.launch` 只接受 JSON 对象并原样保留（不校验、不补默认）。
 - **user.json 结构**（camelCase）：
 
 ```json
@@ -251,6 +255,10 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
     "rust": { "command": "rust-analyzer", "args": [] },
     "cpp": { "command": "clangd", "args": [] },
     "typescript": { "command": "typescript-language-server", "args": ["--stdio"] }
+  },
+  "debug": {
+    "adapters": { "cpp": { "command": "lldb-dap", "args": [] } },
+    "launch": { "cpp": { "program": "${workspaceFolder}/build/app", "console": "integratedTerminal" } }
   }
 }
 ```
@@ -258,6 +266,7 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 ## 11. 布局与窗口
 
 - **四区域**：左侧文件树（180–400px，默认 **220px**）、中间编辑器、底部终端（高度 ≥120px）、右侧栏（搜索/引用/大纲/问题）均可拖拽；终端高度不超过窗口 70% 且为编辑器保留至少 160px；窗口缩放时自动收敛到合法范围。
+- **左侧主栏视图**：活动栏在 资源管理器 / 源代码管理 / 任务 / **运行和调试** 之间切换（四个视图始终挂载、只切换可见性，因此折叠侧栏不会中断调试会话或文件树监听）；调试会话处于 `running` / `stopped` 时「运行和调试」按钮上显示会话徽标。
 - **折叠**：文件树折叠时**完全让位**（编辑器与标签栏贴到窗口最左侧），展开按钮浮动于标签栏左上角；终端折叠为底部「▲ 展开终端」条；右侧栏由顶部栏按钮显隐。
 - **窗口与标题栏**：**自定义标题栏**（`decorations: false`，高 **36px**），左侧为「Logo + lite-ide + 工作区名」，右侧为右侧栏开关、任务中心与 最小化 / 最大化(还原) / 关闭；标题栏空白区可拖动窗口、双击最大化/还原；窗口控制按钮已声明 `core:window:allow-{minimize,toggle-maximize,close,start-dragging}` 权限。最小尺寸 720×480；任务栏标题显示「工作区名 - lite-ide」。
 - **关窗保护**：受 `general.confirmBeforeClose` 控制（默认开）。存在未保存标签时拦截关闭，弹出「保存并退出 / 不保存 / 取消」；保存失败则中止退出。关闭后不再询问。
@@ -300,17 +309,24 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 | `Ctrl/Cmd + .` | 代码操作 / 快速修复（编辑器内） |
 | `Shift + Alt + F` | 格式化文档（编辑器内） |
 | 编辑器内 `(` / `,` | 自动触发签名帮助 |
+| `F5` | 启动调试 / 继续（有会话时） |
+| `F10` | 单步跳过（Step Over） |
+| `F11` | 单步进入（Step Into） |
+| `Shift + F11` | 单步跳出（Step Out） |
+| `Shift + F5` | 停止调试 |
 | `Ctrl/Cmd + 左键` | 跳转到定义（编辑器内） |
 | 鼠标中键点击标签 | 关闭该标签 |
 | 终端内 `Ctrl+C` | 有选区复制 / 无选区中断 |
 | 终端内 `Ctrl+V` | 粘贴（不变） |
+
+调试快捷键是唯一的例外：它们允许绑定**裸功能键**（不含 Ctrl/Alt，见 `BARE_FUNCTION_KEY_ACTIONS`），因此在 `AppLayout` 中于「必须带 Ctrl/Meta」的判定之前匹配；其中 `Shift+F5` 在文本输入（含终端）聚焦时不抢占输入。设置 → 键盘快捷键中它们显示为 `Start / Continue Debugging`、`Step Over`、`Step Into`、`Step Out`、`Stop Debugging`。
 
 ## 13. 数据与配置位置
 
 | 内容 | 路径 |
 |---|---|
 | 会话（上次工作区） | `%APPDATA%\com.longanl.lite-ide\session.json`（Windows） |
-| 用户配置（设置/快捷键/编辑器/lsp 等） | `%APPDATA%\com.longanl.lite-ide\user.json` |
+| 用户配置（设置/快捷键/编辑器/lsp/debug 等） | `%APPDATA%\com.longanl.lite-ide\user.json`（含 `debug.adapters` / `debug.launch` 节，见 §16） |
 | 全局任务列表 | `%APPDATA%\com.longanl.lite-ide\tasks.json` |
 | C/C++ 回退配置（仅无 `compile_commands.json` 时生成） | `<工作区>/.clangd`（首行标记 `# Managed by lite-ide`，可安全删除） |
 | 应用权限声明 | `src-tauri/capabilities/default.json` |
@@ -320,7 +336,13 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 
 ## 14. 已知限制与未实现
 
-- 无命令面板（`Ctrl+Shift+P` 命令执行）；无调试；Git 集成已完成 **Phase 2**（Diff 预览与提交）与 **Phase 3.1**（提交历史 / 提交文件树 / 提交 Diff），分支、推送/拉取、冲突解决等工作区级 Git 操作仍未实现（见 §15 / §15.2）。
+- 无命令面板（`Ctrl+Shift+P` 命令执行）；Git 集成已完成 **Phase 2**（Diff 预览与提交）与 **Phase 3.1**（提交历史 / 提交文件树 / 提交 Diff），分支、推送/拉取、冲突解决等工作区级 Git 操作仍未实现（见 §15 / §15.2）。
+- 调试为**单会话**（Rust 侧 `AppState` 只有一个调试槽）：同一时间只能调试一个程序，再次 F5 是「停止旧会话 → 启动新会话」；无「多目标 / 多线程并行调试」概念。
+- 调试 UI 未提供：条件断点 / 命中次数断点 / 日志点、监视（Watch）与 Evaluate、调试控制台 REPL、函数断点、数据断点；适配器声明的这些能力（`supportsConditionalBreakpoints` 等）不会被用到。
+- 调试器需**手动配置**：应用不内置任何适配器默认值，`debug.adapters.<languageId>` 缺失时启动调试只提示缺少该配置键；`request: "attach"` 可附加到已运行进程，但附加参数（pid / 进程名等）需用户自己写，无进程选择器。
+- 断点按工作区保存在**内存**中（切换工作区不丢失、重启 IDE 清空），不写入磁盘；`verified` 由适配器异步回报（未绑定的断点显示空心圆点）。
+- 变量面板支持按需展开子项（`variablesReference` 缓存按「停止点」整体失效），但不支持修改值（`supportsSetVariable`）与分页（`supportsVariablePaging`）；程序输出在 Debug Terminal（`runInTerminal`）与面板「输出」尾部各露一部分。
+- 反向请求只实现 `runInTerminal`（Debug Terminal 需要），适配器的其它请求被显式拒绝（返回失败），以便适配器自行回退；`initialize` 明确声明不支持 `startDebugging` 反向请求与内存读取。
 - 语言能力**取决于所配置的语言服务器**：并非所有服务器都支持全部能力（例如 rust-analyzer 不提供 `documentRangeFormattingProvider`，即不支持选区格式化），此时对应请求返回空、不伪造结果（代码操作里 `codeAction/resolve` 延迟解析也暂未实现）。
 - 重命名/代码操作的 WorkspaceEdit 不支持资源操作（创建/重命名/删除文件），会给出明确提示；跨文件编辑会先把目标文件作为标签打开（不自动保存，交由用户保存）。
 - 语言服务依赖 PATH 中的外部服务器：`rust-analyzer` / `clangd` / `typescript-language-server` 需自行安装；未安装时对应语言无诊断/补全/跳转（TS/JS 内置 worker 的相关能力已被关闭以让位于语言服务）。
@@ -333,7 +355,7 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 - 终端无分屏、终端内搜索、多行选中粘贴确认；任务终端仅一个固定实例。
 - `node_modules` 内部变化不触发自动刷新（其事件在监听层被过滤）。
 - 全局搜索为逐行、非流式，且受 2000/200/4MB 上限；无「仅包含/排除」过滤器。
-- 无前端测试框架；前端以「`node` 可直接运行的 `.ts` 纯函数测试」（`gitStatusMapping` / `pathIdentity` / `diffSides` / `gitCommitTree` / `commitDiffSides` 五个 `test:*` 脚本）配合 `tsc`/`vite build` 与手工清单验证；测试覆盖主体在 Rust 侧（167 个单元测试，含 Git 状态解析、反引号解码、Diff 双侧读取、提交、提交历史与提交文件解析等用例）。
+- 无前端测试框架；前端以「`node` 可直接运行的 `.ts` 纯函数测试」配合 `tsc`/`vite build` 与手工清单验证，现有 7 个 `test:*` 脚本：`gitStatusMapping` / `pathIdentity` / `diffSides` / `gitCommitTree` / `commitDiffSides` / `debug-state`（调试状态机全部迁移与断点裁决合并）/ `debug-launch`（启动配置构建、变量展开、`request` 类型）；测试覆盖主体在 Rust 侧（214 个单元测试，含 Git 状态解析、反引号解码、Diff 双侧读取、提交与提交历史解析、DAP 报文分类与请求关联、`Content-Length` 帧编解码等用例），另有 1 个真实 `lldb-dap` 端到端测试（3 个用例，工具缺失时自动跳过）。
 
 ## 15. 源代码管理（Git · Phase 2）
 
@@ -386,7 +408,61 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 - **刷新策略**：进入「历史」视图时重新加载首页（提交后切到历史天然拿到最新提交）；工具栏「刷新」在历史视图下同时重载历史与状态；切换工作区清空历史/详情并丢弃在途结果（序列号竞态保护，与 `gitStore`/`diffStore` 一致）。
 - **本阶段范围外（留待后续）**：分支、推送/拉取、冲突解决、标签、逐文件历史（blame/file history）、提交信息编辑等。`git log` 基于当前分支 HEAD，不感知未提交的工作区改动。
 
-## 16. 手工验收清单
+## 16. 调试（内置 DAP 客户端）
+
+自建 Debug Adapter Protocol 客户端，**不含任何调试器特定代码**：调试器是一个外部适配器进程（例如 `lldb-dap`），其命令行与启动参数完全由 `user.json` 决定，因此「支持一种新语言」是改配置而不是改代码。
+
+### 16.1 配置（`user.json` 的 `debug` 节）
+
+```json
+{
+  "debug": {
+    "adapters": { "cpp": { "command": "lldb-dap", "args": [] } },
+    "launch": {
+      "cpp": {
+        "program": "${workspaceFolder}/build/app",
+        "args": [],
+        "console": "integratedTerminal",
+        "request": "launch"
+      }
+    }
+  }
+}
+```
+
+- **`adapters.<languageId>`**：适配器命令行。键名大小写不敏感（解析时统一小写，`Rust`/`rust` 都能命中）；`command` 为空白的条目会被丢弃（前端视作「未配置」并提示缺少该键）；裸可执行名会先在 PATH 中解析成**绝对路径**再启动——`lldb-dap` 用自身 `argv[0]` 构造 `runInTerminal` 的启动命令，裸名字会变成相对 IDE cwd 的无效路径。
+- **`launch.<languageId>`**：DAP `launch` / `attach` 参数，**原样透传**（只要求是 JSON 对象，不做语义校验）。其中 `${…}` 按任务系统同一套规则展开：`${workspaceFolder}`、`${file}`、`${fileBasename}`、`${fileBasenameNoExtension}`、`${fileDirname}`、`${relativeFile}`、`${relativeFileDirname}`，另有调试专用的 `${program}` / `${programBasename}`；绝对路径结果会剥离 Windows `\\?\` 扩展长度前缀（与任务变量同源）。未知变量**保持原样**，这样拼写错误会原样出现在适配器的报错里，而不是变成空路径。
+- **合并优先级**：内置默认 → 用户配置 → 变量展开（用户永远优先）。内置默认只有两条：C/C++ 的 `program = build/app`（Windows 追加 `.exe`）与 `console = integratedTerminal`；其它语言**没有**默认 `program`，必须自己写，否则启动前就报 `program not found`（比适配器各自的失败文案更好懂）。
+- **缺省值**：`request` 缺省 `launch`（`"attach"` 附加到已运行进程，未知值回退 `launch`）；`cwd` 缺省工作区根；`stopOnEntry` 缺省 `false`。`request` 本身不会作为参数发给适配器。
+- **生效时机**：每次启动调试时读取，改完 `user.json` 保存后重新 F5 即生效（**无需重启应用**）。设置 → 调试 只有一个「打开 user.json」按钮（用 `ensureUserConfigFile` + `editorStore.openGlobalFile`，不引入第二套调试表单 schema）。
+
+### 16.2 能力与交互
+
+- **入口**：活动栏「运行和调试」（图标为播放三角 + bug），打开**左侧主栏**「运行和调试」视图；会话处于 `running` / `stopped` 时活动栏按钮显示一个小圆点徽标。
+- **会话工具栏（编辑器内的浮层）**：运行中 → 暂停；已暂停 → 继续 / 单步跳过 / 单步进入 / 单步跳出；常驻 重启 / 停止。按钮按适配器 `initialize` 返回的 capabilities 门控（**只有显式 `false` 才禁用**，未知能力保持可用）。浮层是绝对定位覆盖，不参与编辑器布局。
+- **侧栏面板**：顶部的启动 / 附加按钮与状态行（错误文本 > 已暂停原因 > 运行中 > 正在启动 + 适配器名），下面是 **断点**（按文件分组、可跳转、可逐个移除，实心圆点 = 适配器已绑定、空心 = 尚未解析）、**调用堆栈**（线程数 > 1 时出现线程下拉；点击栈帧同时选中该帧并把编辑器移到其位置，无源码的原生帧只选中不跳转）、**变量**（按 scope 分组、可逐层展开子项、缓存按停止点整体失效）、**输出**（适配器 `output` 事件的最后 12 行；状态机保留最近 200 行）。
+- **断点**：在编辑器**装订线（glyph margin）**上单击切换（装订线常开，因此会话开始后点击位置不会移动）；点击断点列表行是**跳转**而不是删除，删除用行尾 ✕。断点按**工作区**保存在内存里：结束会话、切走再切回工作区都不会丢，重启 IDE 才清空；适配器通过 `breakpoint` 事件异步回报的 `verified`/`id` 只更新徽标，**不会增删**用户设置的断点。
+- **导航**：停止位置或选中的栈帧变化 → `openAndReveal` 打开源文件并滚动到该行（工作区外文件走只读外部标签，无法解析的合成路径静默忽略）；当前执行行本身由调试装饰层高亮（含 overview ruler 标记），因此关闭侧栏也仍然可见。
+- **启动顺序**：`initialize` → `setExceptionBreakpoints([])` → 写 `launch`/`attach`（后端在此立即返回，不等响应）→ 等适配器的 `initialized` 事件 → 逐文件 `setBreakpoints` → `configurationDone` → 程序才真正开始运行。这样「第 5 行的断点」在 `main` 执行前就已就位；而 `launch` 响应被推迟到首次停止（真实 `lldb-dap` 行为），因此不等它，否则会与尚未发送的 `configurationDone` 互相等待。
+- **继续 / 单步**：发请求前**立即**清除当前行标记（适配器可能把 `continue` 的响应推迟到下一次停止），随后的 `stopped` 事件重新定位；`continued` 事件重复触发是幂等的。
+- **停止 / 重启**：`disconnect(terminateDebuggee: true)` 结束被调试进程并关闭 Debug 终端；重启是「停止后按同一语言重新启动」的编排，不是 DAP 请求。
+- **错误呈现**：适配器不可用、程序不存在、请求失败、适配器退出等都以 Toast 或侧栏状态行显示，且保留适配器原文（例如 `program not found: …`、未配置时提示 `debug.adapters.<languageId>`）。
+
+### 16.3 Debug Terminal
+
+- 启动调试时会自动展开终端面板并聚焦一个固定的 **Debug** 标签（前端 id 与 Rust `terminal::DEBUG_TERMINAL_ID` 同为 `1000000`）。
+- 它**不 spawn shell**：PTY 里跑的就是被调试进程——由适配器经 `runInTerminal` 反向请求（`args[0]` 即启动程序，如 `lldb-dap --comm-file …`）由后端 `terminal::spawn_program` 创建，因此程序的 stdin/stdout/stderr 就是这个 xterm，**交互式 `stdin`（`cin >> n`）可用**。
+- 数据通路：输出经 Tauri 事件 `debug-terminal-output`（空数据块 = `debug-terminal-exit`）；键盘输入走普通 `terminal_write`；尺寸走 `terminal_resize`；停止调试 / 会话结束 / 切工作区时关闭该 PTY（已打印的内容留在 xterm 缓冲区）。
+- 普通终端与任务终端仍各自 spawn shell，只有 Debug 终端是「程序即终端」。
+
+### 16.4 状态与生命周期
+
+- 状态机是**纯函数**（`src/debug/stateMachine.ts`）：状态只由 DAP 响应与事件决定，按钮点击从不直接写 `running` / `stopped`。状态为 `idle` / `starting` / `running` / `stopped` / `terminated` / `disconnected`。
+- Rust 侧只有一个调试槽（`AppState.debug`）：`terminated` 事件表示「这一次调试已结束」——即使适配器进程仍存活（真实 `lldb-dap` 会等 `disconnect`），会话也会被标记 finished、清出槽位并回收，因此下一次 F5 不会被「已在运行」挡住；清理带**身份校验**，旧会话不会误删接替它的新会话。
+- 适配器进程意外退出 → `debug-exited` 事件 → 状态置为 `disconnected` 并显示原因；不自动重启。
+- 切换工作区、关闭应用都会终止会话与 Debug 终端（`set_workspace` / `RunEvent::Exit` 调 `stop_debug`）。
+
+## 17. 手工验收清单
 
 ```bash
 pnpm install
@@ -420,3 +496,9 @@ pnpm tauri dev
 25. **Git Diff**：对同一个文件先工作区修改（M）再「暂存」成 MM —— 「更改」里点击 → 左侧 `Index` 右侧 `工作区`（对比的是暂存后用编辑器再改的内容）；「已暂存更改」里点击 → 左侧 `HEAD` 右侧 `Index`；纯工作区修改点击 → 左侧 `HEAD` 右侧 `工作区`；未跟踪新文件点击 → 左侧「空」；新增已暂存（A）点击 → 左侧「空」右侧 `Index`；删除 ` D` 点击 → 左侧 `Index` 右侧「空」，行首删除线样式；「关闭」按钮与 `Esc` 均能退出 Diff；打开的 Diff 随后在外部改文件 → 重新点击刷新内容；切换工作区/关闭改面板 → Diff 自动关闭；二进制文件（如 `.png`）点击 → 显示「二进制文件，不支持预览」。
 26. **Git 提交**：暂存若干文件 → 提交框输入 `Ctrl/Cmd+Enter`（或点「提交」）→ 成功后「已暂存更改」清空、文件树徽标更新，`git log` 可见该提交且文件树处于干净状态；输入框为空或无已暂存更改时「提交」按钮禁用；临时清除 `user.name`/`user.email` 后提交 → 面板显示 stderr 原文。
 27. **Git 历史**：仓库内源代码管理面板出现「更改 / 历史」切换，点「历史」→ 出现提交列表（短哈希 + 说明 + 相对时间）；空仓库 → 「还没有提交记录」；点击最后一条提交 → 显示详情（父提交、作者、绝对时间）与文件树（目录在前、默认展开、点击目录折叠）；点下列任一文件弹出 只读 Diff —— 修改文件 → 左 `父哈希:path` 右 `提交哈希:path`；新增文件 → 左「空」右 `提交哈希:path`；删除文件 → 左 `父哈希:path` 右「空」；重命名的文件 → 左 `父哈希:旧路径`；初始提交（无父）→ 新增文件仍显示 空 ↔ 提交；`Esc`/「关闭」退出 Diff；「加载更多」追加提交；提交页满 50 条后切到「历史」能继续翻页；在「历史」视图点工具栏「刷新」→ 列表与详情重载；提交若干新文件后切到「历史」→ 最新提交出现在顶部。
+28. **调试配置与启动**：在 `user.json` 写入 `"debug": { "adapters": { "cpp": { "command": "lldb-dap" } }, "launch": { "cpp": { "program": "${workspaceFolder}/build/app" } } }`（或设置 → 调试 → 打开 user.json）；打开一个 C/C++ 源文件并点击装订线设置断点（出现空心圆点）→ 按 `F5` → 终端面板自动展开并聚焦 **Debug** 标签、程序在断点处暂停（圆点变实心、当前行高亮、活动栏「运行和调试」出现小圆点、侧栏状态行显示暂停原因）→ `F10` / `F11` / `Shift+F11` 单步、`F5` 继续到下一个断点、`Shift+F5` 停止后活动栏圆点消失。
+29. **调用堆栈与变量**：暂停后侧栏显示调用堆栈（多线程时出现线程下拉）→ 点击外层栈帧 → 编辑器跳到该帧源码、变量面板切换到该帧的 scope；点击带 `▸` 的变量展开子项，切换栈帧后展开状态与缓存被清空（不会串帧）。
+30. **Debug Terminal（交互式 stdin）**：程序里写 `std::cin >> n;` → `F5` → 在 Debug 标签中输入数字并回车 → 程序继续执行并打印结果；程序结束后标签显示「(已退出)」；`Shift+F5` 停止调试后该 PTY 关闭（已打印内容仍在屏幕上）。
+31. **调试边界**：删掉 `debug.adapters.cpp` 再 `F5` → 提示未配置该配置键且不崩溃；把 `program` 指向不存在的文件 → 提示 `program not found: …`；把 `launch.cpp` 改为 `"request": "attach"` → 侧栏按钮变为「附加」且不再校验本地 program；调试运行中切换工作区 / 关闭应用 → 被调试进程与 Debug 终端一并结束。
+32. **调试快捷键**：设置 → 键盘快捷键中出现 `Start / Continue Debugging`（`F5`）、`Step Over`（`F10`）、`Step Into`（`F11`）、`Step Out`（`Shift+F11`）、`Stop Debugging`（`Shift+F5`）；把它们改绑为带 Ctrl 的组合键后仍然生效。
+33. **调试端到端测试（可选）**：`cd src-tauri && cargo test` —— 需要 PATH 中的 `g++`（或 `clang++`）与 `lldb-dap`，缺失时 `tests/dap_lldb.rs` 的 3 个用例会打印跳过信息而不是失败；前端纯函数测试用 `pnpm test:debug-state` 与 `pnpm test:debug-launch`。

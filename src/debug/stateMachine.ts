@@ -1,6 +1,7 @@
 // The `.ts` extension is what lets this module run under `node` for
 // `stateMachine.test.ts`; it matches `utils/gitStatusMapping.ts`.
 import { INITIAL_DEBUG_STATE } from "./types.ts";
+import { dapSourcePath } from "./sourcePath.ts";
 import type {
   DebugBreakpoint,
   DebugState,
@@ -355,13 +356,19 @@ export function mergeBreakpointVerdicts(
   });
 }
 
-/** Turn a file's breakpoint lines into the `setBreakpoints` payload. */
+/**
+ * Turn a file's breakpoint lines into the `setBreakpoints` payload.
+ *
+ * The path goes through `dapSourcePath`: this string is compared by the
+ * **adapter** against its own debug information, case included, so a case-folded
+ * identity key (`fileKey`) would leave every breakpoint unbound on Windows.
+ */
 export function breakpointRequest(
   path: string,
   lines: number[],
 ): { source: { path: string }; breakpoints: { line: number }[]; sourceModified: boolean } {
   return {
-    source: { path },
+    source: { path: dapSourcePath(path) },
     breakpoints: [...lines].sort((a, b) => a - b).map((line) => ({ line })),
     sourceModified: false,
   };

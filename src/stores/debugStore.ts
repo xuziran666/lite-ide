@@ -151,9 +151,13 @@ export const useDebugStore = create<DebugStore>((set, get) => ({
       // Called straight through the command wrapper rather than through
       // `debug/session`: the store must not depend on the orchestrator that
       // depends on it, and this is the one request the store issues itself.
+      //
+      // The payload is built from `file.path` (the recorded path, case
+      // preserved), never from `key`: that key is case-folded on Windows, and
+      // the adapter compares `Source.path` against its own debug information.
       const body = (await debugRequest(
         "setBreakpoints",
-        breakpointRequest(key, file.lines),
+        breakpointRequest(file.path, file.lines),
       )) as {
         breakpoints?: DapBreakpoint[];
       };
@@ -203,7 +207,7 @@ export const useDebugStore = create<DebugStore>((set, get) => ({
     const files = Object.values(get().breakpointsByFile);
     for (const file of files) {
       const body = (await send(
-        breakpointRequest(fileKey(file.path), file.lines),
+        breakpointRequest(file.path, file.lines),
       )) as { breakpoints?: DapBreakpoint[] };
       const merged = mergeBreakpointVerdicts(
         file.lines.map((line) => ({ line })),
