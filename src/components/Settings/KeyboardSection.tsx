@@ -6,6 +6,7 @@ import {
   KEYBINDING_LABELS,
   chordFromEvent,
   isDoubleCtrlChord,
+  isFunctionKey,
   isUsableShortcut,
   type KeybindingAction,
 } from "../../config/keybindings";
@@ -57,11 +58,13 @@ function KeyboardSection() {
         setHint("请按下一个快捷键");
         return;
       }
-      if (!isUsableShortcut(chord)) {
+      if (!isUsableShortcut(chord, recording)) {
         setHint(
           chord.includes("Alt")
             ? "该快捷键不能包含 Alt"
-            : "快捷键需要包含 Ctrl 或 Meta 键",
+            : isFunctionKey(chord.replace(/^Shift\+/, ""))
+              ? "调试操作可以使用 F1–F24 这样的功能键"
+              : "快捷键需要包含 Ctrl 或 Meta 键",
         );
         return;
       }

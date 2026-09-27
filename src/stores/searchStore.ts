@@ -5,7 +5,11 @@ import { useWorkspaceStore } from "./workspaceStore";
 export type RightSidebarTab = "search" | "references" | "outline" | "problems";
 
 /** Active view of the left primary sidebar; null means fully collapsed. */
-export type PrimarySidebarView = "explorer" | "sourceControl" | "tasks";
+export type PrimarySidebarView =
+  | "explorer"
+  | "sourceControl"
+  | "tasks"
+  | "debug";
 
 /** One `textDocument/references` result row. */
 export interface ReferenceItem {

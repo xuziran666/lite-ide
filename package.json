@@ -13,7 +13,9 @@
     "test:path-identity": "node src/utils/pathIdentity.test.ts",
     "test:diff-sides": "node src/utils/diffSides.test.ts",
     "test:commit-tree": "node src/utils/gitCommitTree.test.ts",
-    "test:commit-diff-sides": "node src/utils/commitDiffSides.test.ts"
+    "test:commit-diff-sides": "node src/utils/commitDiffSides.test.ts",
+    "test:debug-state": "node src/debug/stateMachine.test.ts",
+    "test:debug-launch": "node src/debug/launchConfig.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

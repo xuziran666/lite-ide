@@ -15,6 +15,19 @@ const FLUSH_BYTES: usize = 4096;
 /// Maximum delay before partial terminal output is flushed.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(16);
 
+/// The terminal id reserved for the debuggee's terminal (DAP `runInTerminal`).
+///
+/// A fixed id, mirrored by the frontend, so the Debug Terminal tab is reused
+/// across runs and `terminal_write` / `terminal_resize` / `terminal_kill` can
+/// address it with the normal terminal commands. Normal terminals hand out
+/// small sequential ids from the frontend, so this never collides.
+pub const DEBUG_TERMINAL_ID: u64 = 1_000_000;
+
+/// Where pty output is delivered. The normal terminal streams to a Tauri
+/// `Channel` created by the frontend; the Debug Terminal streams to Tauri events
+/// because the backend (not the frontend) initiates it, via `runInTerminal`.
+pub type OutputSink = Arc<dyn Fn(Vec<u8>) + Send + Sync>;
+
 /// A running pseudo-terminal: the pty handle, its input writer and the child
 /// shell process.
 pub struct TerminalSession {
@@ -43,6 +56,42 @@ impl TerminalSession {
         cwd: Option<PathBuf>,
         channel: Channel<Vec<u8>>,
     ) -> Result<Self, String> {
+        let sink: OutputSink = Arc::new(move |data| {
+            let _ = channel.send(data);
+        });
+        let mut cmd = CommandBuilder::new(shell);
+        if let Some(dir) = &cwd {
+            cmd.cwd(dir);
+        }
+        cmd.env("TERM", "xterm-256color");
+        Self::spawn_with(cmd, sink)
+    }
+
+    /// Spawn an arbitrary program (the debuggee, or the adapter's
+    /// `runInTerminal` launcher) in a pty. Unlike `spawn`, no shell is involved:
+    /// the program's own stdin/stdout/stderr are the pty.
+    pub fn spawn_program(
+        program: &str,
+        args: &[String],
+        cwd: Option<PathBuf>,
+        env: &[(String, String)],
+        sink: OutputSink,
+    ) -> Result<Self, String> {
+        let mut cmd = CommandBuilder::new(program);
+        if !args.is_empty() {
+            cmd.args(args.iter().map(|arg| arg.as_str()));
+        }
+        if let Some(dir) = &cwd {
+            cmd.cwd(dir);
+        }
+        cmd.env("TERM", "xterm-256color");
+        for (key, value) in env {
+            cmd.env(key, value);
+        }
+        Self::spawn_with(cmd, sink)
+    }
+
+    fn spawn_with(cmd: CommandBuilder, sink: OutputSink) -> Result<Self, String> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows: 24,
@@ -54,16 +103,10 @@ impl TerminalSession {
             .openpty(size)
             .map_err(|e| io_error("open pseudo terminal", e))?;
 
-        let mut cmd = CommandBuilder::new(shell);
-        if let Some(dir) = &cwd {
-            cmd.cwd(dir);
-        }
-        cmd.env("TERM", "xterm-256color");
-
         let child = pair
             .slave
             .spawn_command(cmd)
-            .map_err(|e| io_error("spawn shell in terminal", e))?;
+            .map_err(|e| io_error("spawn command in terminal", e))?;
         let writer = pair
             .master
             .take_writer()
@@ -73,13 +116,18 @@ impl TerminalSession {
             .try_clone_reader()
             .map_err(|e| io_error("take terminal reader", e))?;
 
-        spawn_output_thread(reader, channel);
+        spawn_output_thread(reader, sink);
 
         Ok(Self {
             master: pair.master,
             writer,
             child,
         })
+    }
+
+    /// The OS process id of the child running in the pty, if known.
+    pub fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
     }
 
     /// Write input from the user (as UTF-8) into the pty.
@@ -128,7 +176,7 @@ impl Drop for TerminalSession {
 /// Read the pty output into a shared buffer; a flusher thread batches it into
 /// bounded 4KB/16ms chunks and sends them over the channel. A final empty chunk
 /// signals that the shell has exited.
-fn spawn_output_thread(mut reader: Box<dyn Read + Send>, channel: Channel<Vec<u8>>) {
+fn spawn_output_thread(mut reader: Box<dyn Read + Send>, sink: OutputSink) {
     let shared: SharedBuf = Arc::new((
         Mutex::new(OutputBuf {
             pending: Vec::new(),
@@ -179,12 +227,12 @@ fn spawn_output_thread(mut reader: Box<dyn Read + Send>, channel: Channel<Vec<u8
                 if guard.pending.is_empty() {
                     drop(guard);
                     // Empty chunk = exit marker.
-                    let _ = channel.send(Vec::new());
+                    sink(Vec::new());
                     break;
                 }
                 let data = std::mem::take(&mut guard.pending);
                 drop(guard);
-                let _ = channel.send(data);
+                sink(data);
                 last_flush = Instant::now();
                 continue;
             }
@@ -194,7 +242,7 @@ fn spawn_output_thread(mut reader: Box<dyn Read + Send>, channel: Channel<Vec<u8
             if !guard.pending.is_empty() && (due || full) {
                 let data = std::mem::take(&mut guard.pending);
                 drop(guard);
-                let _ = channel.send(data);
+                sink(data);
                 last_flush = Instant::now();
             }
         }

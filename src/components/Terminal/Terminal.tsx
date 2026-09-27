@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import "@xterm/xterm/css/xterm.css";
 import {
   terminalSpawn,
@@ -10,7 +11,10 @@ import {
   terminalResize,
   terminalKill,
 } from "../../commands";
-import { useTerminalStore } from "../../stores/terminalStore";
+import {
+  useTerminalStore,
+  DEBUG_TERMINAL_ID,
+} from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useConfigStore } from "../../stores/configStore";
 
@@ -397,6 +401,164 @@ interface TerminalPaneProps {
   onCollapse: () => void;
 }
 
+/**
+ * The debuggee's own terminal.
+ *
+ * Unlike the normal and task terminals, it does not spawn a shell: its pty is
+ * the debuggee (created by the backend when lldb-dap sends `runInTerminal`), so
+ * the program's stdin/stdout/stderr are this xterm. Output arrives as backend
+ * events; input is forwarded with the ordinary `terminal_write`.
+ *
+ * The instance only exists once the Debug tab does (created on F5), and it stays
+ * mounted while the panel is collapsed, so output is never dropped.
+ */
+function DebugTerminalInstance({
+  active,
+  instances,
+}: {
+  active: boolean;
+  instances: InstanceRegistry;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const exited = useTerminalStore(
+    (s) => s.terminals.find((t) => t.kind === "debug")?.exited ?? false,
+  );
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    host.textContent = "";
+
+    const initial = useConfigStore.getState();
+    const term = new Terminal({
+      convertEol: false,
+      cursorBlink: true,
+      cursorStyle: "block",
+      fontFamily: initial.terminal.fontFamily,
+      fontSize: initial.terminal.fontSize,
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    let webgl: WebglAddon | null = null;
+    try {
+      webgl = new WebglAddon();
+      term.loadAddon(webgl);
+    } catch {
+      // canvas renderer fallback
+    }
+    term.open(host);
+    termRef.current = term;
+
+    term.onData((data) => {
+      void terminalWrite(DEBUG_TERMINAL_ID, data).catch(() => undefined);
+    });
+
+    let unlistenOutput: UnlistenFn | null = null;
+    let unlistenExit: UnlistenFn | null = null;
+    void (async () => {
+      unlistenOutput = await listen<{ id: number; data: unknown }>(
+        "debug-terminal-output",
+        ({ payload }) => {
+          if (payload.id !== DEBUG_TERMINAL_ID) return;
+          term.write(toUint8Array(payload.data));
+        },
+      );
+      unlistenExit = await listen<{ id: number }>(
+        "debug-terminal-exit",
+        ({ payload }) => {
+          if (payload.id !== DEBUG_TERMINAL_ID) return;
+          useTerminalStore.getState().markExited(DEBUG_TERMINAL_ID);
+        },
+      );
+    })();
+
+    const fitAndReport = () => {
+      requestAnimationFrame(() => {
+        if (!activeRef.current) return;
+        const container = hostRef.current;
+        if (
+          !container ||
+          container.clientWidth === 0 ||
+          container.clientHeight === 0
+        ) {
+          return;
+        }
+        try {
+          fit.fit();
+          if (term.cols > 0 && term.rows > 0) {
+            void terminalResize(DEBUG_TERMINAL_ID, term.cols, term.rows).catch(
+              () => undefined,
+            );
+          }
+        } catch {
+          // container not sized yet
+        }
+      });
+    };
+    const resizeObserver = new ResizeObserver(fitAndReport);
+    resizeObserver.observe(host);
+    if (activeRef.current && host.clientWidth > 0 && host.clientHeight > 0) {
+      fitAndReport();
+    }
+
+    const unsubFont = useConfigStore.subscribe((state, prev) => {
+      if (
+        state.terminal.fontFamily === prev.terminal.fontFamily &&
+        state.terminal.fontSize === prev.terminal.fontSize
+      ) {
+        return;
+      }
+      term.options.fontFamily = state.terminal.fontFamily;
+      term.options.fontSize = state.terminal.fontSize;
+      fitAndReport();
+    });
+
+    return () => {
+      unsubFont();
+      unlistenOutput?.();
+      unlistenExit?.();
+      resizeObserver.disconnect();
+      webgl?.dispose();
+      term.dispose();
+      termRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!active) return;
+    requestAnimationFrame(() => {
+      if (activeRef.current) termRef.current?.focus();
+    });
+  }, [active]);
+
+  useEffect(() => {
+    instances.current.set(DEBUG_TERMINAL_ID, {
+      clear: () => termRef.current?.clear(),
+      restart: () => undefined,
+    });
+    return () => {
+      instances.current.delete(DEBUG_TERMINAL_ID);
+    };
+  }, [instances]);
+
+  return (
+    <div
+      className={active ? "terminal-instance active" : "terminal-instance"}
+      style={{ display: active ? undefined : "none" }}
+    >
+      <div className="terminal-host" ref={hostRef} />
+      {exited && (
+        <div className="terminal-exited-bar">
+          <span>程序已退出</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TerminalPane({ onCollapse }: TerminalPaneProps) {
   const terminals = useTerminalStore((s) => s.terminals);
   const activeId = useTerminalStore((s) => s.activeId);
@@ -409,7 +571,10 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
 
   const taskTab =
     terminals.find((t) => t.id === taskTerminalId) ?? null;
-  const normalTerminals = terminals.filter((t) => t.kind !== "task");
+  const debugTab = terminals.find((t) => t.kind === "debug") ?? null;
+  const normalTerminals = terminals.filter(
+    (t) => t.kind !== "task" && t.kind !== "debug",
+  );
 
   const clearActive = () => {
     if (activeId == null) return;
@@ -443,6 +608,22 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
               onClick={() => select(taskTab.id)}
             >
               任务{taskRunning ? " ●" : ""}
+            </button>
+          )}
+          {debugTab && (
+            <button
+              key="debug"
+              type="button"
+              className={
+                debugTab.id === activeId
+                  ? "terminal-tab debug active"
+                  : "terminal-tab debug"
+              }
+              title="调试终端（程序的标准输入输出）"
+              onClick={() => select(debugTab.id)}
+            >
+              {debugTab.name}
+              {debugTab.exited ? " (已退出)" : ""}
             </button>
           )}
           {normalTerminals.map((t) => (
@@ -517,6 +698,12 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
             instances={instances}
           />
         ))}
+        {debugTab && (
+          <DebugTerminalInstance
+            active={debugTab.id === activeId}
+            instances={instances}
+          />
+        )}
       </div>
     </section>
   );

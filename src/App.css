@@ -2694,3 +2694,518 @@ body.layout-resizing-horizontal {
   overflow: auto;
 }
 
+
+/* ---- Run and Debug panel ----
+ *
+ * Self-contained: everything is prefixed `debug-` and reuses the shared
+ * `--vo-color-*` variables so the light theme keeps working. It intentionally
+ * does not touch the Explorer / Source Control / Tasks styles.
+ */
+
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-size: 12px;
+}
+
+/* ---- Floating editor debug toolbar ----
+ * An absolute overlay inside `.editor-stack` (which is `position: relative`),
+ * so it never takes part in the editor's layout and Monaco keeps its full size
+ * and scroll area. Shown only for a running/stopped session (the component
+ * returns null otherwise).
+ */
+.debug-float-toolbar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 4px;
+  color: var(--vo-color-cccccc);
+  background-color: var(--vo-color-3a3d41);
+  border: 1px solid var(--vo-color-454545);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.36);
+  user-select: none;
+}
+
+.debug-float-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 24px;
+  color: var(--vo-color-858585);
+  cursor: grab;
+}
+
+.debug-float-handle:hover {
+  color: var(--vo-color-cccccc);
+}
+
+.debug-float-button {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.debug-float-button:hover:not(:disabled) {
+  color: var(--vo-color-ffffff);
+  background-color: var(--vo-color-454545);
+}
+
+.debug-float-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.debug-float-button.stop:hover:not(:disabled) {
+  color: var(--vo-color-ffffff);
+  background-color: var(--vo-color-f14c4c);
+}
+
+.debug-float-button.more {
+  font-size: 11px;
+  color: var(--vo-color-858585);
+}
+
+.debug-float-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background-color: var(--vo-color-454545);
+}
+
+.debug-toolbar {
+
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--vo-color-3c3c3c);
+}
+
+.debug-toolbar-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.debug-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--vo-color-cccccc);
+  background-color: var(--vo-color-3a3d41);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.debug-button:hover:not(:disabled) {
+  background-color: var(--vo-color-454545);
+  color: var(--vo-color-ffffff);
+}
+
+.debug-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.debug-button.primary {
+  background-color: var(--vo-color-0e639c);
+  color: var(--vo-color-ffffff);
+}
+
+.debug-button.primary:hover:not(:disabled) {
+  background-color: var(--vo-color-1177bb);
+}
+
+.debug-button.stop {
+  background-color: transparent;
+  border-color: var(--vo-color-6e7681);
+}
+
+.debug-button.stop:hover:not(:disabled) {
+  background-color: var(--vo-color-f14c4c);
+  border-color: var(--vo-color-f14c4c);
+  color: var(--vo-color-ffffff);
+}
+
+.debug-toolbar-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+}
+
+.debug-status {
+  flex: 1;
+  min-width: 0;
+  color: var(--vo-color-cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-status.error {
+  color: var(--vo-color-f14c4c);
+}
+
+.debug-adapter {
+  color: var(--vo-color-858585);
+  white-space: nowrap;
+}
+
+.debug-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.debug-section {
+  border-bottom: 1px solid var(--vo-color-2d2d2d);
+  padding-bottom: 6px;
+}
+
+.debug-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  position: sticky;
+  top: 0;
+  background-color: var(--vo-color-252526);
+  z-index: 1;
+}
+
+.debug-section-header h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vo-color-cccccc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-count {
+  font-size: 11px;
+  color: var(--vo-color-858585);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+
+.debug-empty {
+  margin: 4px 10px;
+  color: var(--vo-color-858585);
+}
+
+.debug-empty.small {
+  margin: 2px 10px;
+}
+
+.debug-note {
+  margin: 2px 10px 4px;
+  color: var(--vo-color-858585);
+  font-size: 11px;
+}
+
+.debug-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.debug-file-name {
+  padding: 2px 10px;
+  color: var(--vo-color-cccccc);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-breakpoint-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.debug-breakpoint-row,
+.debug-frame-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 10px;
+  background: transparent;
+  border: none;
+  color: var(--vo-color-cccccc);
+  text-align: left;
+  cursor: pointer;
+}
+
+.debug-breakpoint-row:hover,
+.debug-frame-row:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.debug-frame-row.selected {
+  background-color: var(--vo-color-37373d);
+}
+
+.debug-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.debug-dot.verified {
+  background-color: var(--vo-color-f14c4c);
+}
+
+.debug-dot.unverified {
+  background-color: transparent;
+  border: 1px solid var(--vo-color-858585);
+}
+
+.debug-line-number,
+.debug-frame-location {
+  color: var(--vo-color-858585);
+}
+
+.debug-breakpoint-item {
+  display: flex;
+  align-items: center;
+}
+
+.debug-breakpoint-item .debug-breakpoint-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.debug-breakpoint-remove {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--vo-color-858585);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.debug-breakpoint-item:hover .debug-breakpoint-remove {
+  opacity: 1;
+}
+
+.debug-breakpoint-remove:hover {
+  background-color: var(--vo-color-3a3d41);
+  color: var(--vo-color-ffffff);
+}
+
+
+.debug-frame-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-scope {
+  padding: 2px 0;
+}
+
+.debug-scope-name {
+  margin: 4px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--vo-color-cccccc);
+}
+
+.debug-thread-select {
+  max-width: 55%;
+  padding: 1px 4px;
+  font-size: 11px;
+  color: var(--vo-color-cccccc);
+  background-color: var(--vo-color-3a3d41);
+  border: 1px solid var(--vo-color-454545);
+  border-radius: 3px;
+}
+
+.debug-variables {
+  width: 100%;
+}
+
+.debug-variable-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 10px 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.debug-variable-row.expandable {
+  cursor: pointer;
+}
+
+.debug-variable-row.expandable:hover {
+  background-color: var(--vo-color-2a2d2e);
+}
+
+.debug-variable-arrow {
+  flex: none;
+  width: 10px;
+  color: var(--vo-color-858585);
+}
+
+.debug-variable-name {
+  flex: none;
+  color: var(--vo-color-9d9d9d);
+}
+
+.debug-variable-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--vo-color-cccccc);
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+
+.debug-variable-type {
+  flex: none;
+  color: var(--vo-color-6e7681);
+  font-size: 11px;
+}
+
+
+.debug-output {
+  margin: 4px 10px;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--vo-color-cccccc);
+}
+
+.debug-output-line.stderr {
+  color: var(--vo-color-f48771);
+}
+
+.debug-panel-footer {
+  flex: none;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vo-color-3c3c3c);
+}
+
+.debug-link {
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--vo-color-007acc);
+
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.debug-link:hover {
+  text-decoration: underline;
+}
+
+/* Activity Bar: a live session shows a small dot on the debug icon. */
+.activity-bar-button {
+  position: relative;
+}
+
+.activity-bar-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--vo-color-f14c4c);
+  pointer-events: none;
+}
+
+/* Monaco decorations drawn by debug/editorDecorations.ts. Breakpoints are
+ * circles in the glyph margin; the current line is a full-line highlight. */
+.debug-breakpoint,
+.debug-breakpoint-unverified {
+  position: relative;
+}
+
+.debug-breakpoint::after,
+.debug-breakpoint-unverified::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background-color: #e51400;
+}
+
+.debug-breakpoint-unverified::after {
+  background-color: transparent;
+  border: 1px solid #e51400;
+}
+
+.debug-current-line {
+  /* A tinted band plus a solid left bar: the tint survives the light theme,
+     where a low-alpha fill alone washes out, and the bar makes the exact line
+     unambiguous even when the line is also a breakpoint. */
+  background-color: rgba(255, 193, 7, 0.22);
+  box-shadow: inset 3px 0 0 0 #ffc107;
+}
+
+
+.debug-current-line-glyph::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid #e51400;
+}

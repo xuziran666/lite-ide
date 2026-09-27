@@ -2,6 +2,7 @@ import {
   canonicalPath,
   isAbsolutePath,
   isPathInsideWorkspace,
+  matchingOpenPath,
   resolveAgainstWorkspace,
   sameFile,
 } from "./pathIdentity.ts";
@@ -151,6 +152,49 @@ console.log("regression intent: what actually failed before the fix");
     canonicalPath(resolveAgainstWorkspace(REL, WS)),
     canonicalPath(resolveAgainstWorkspace(REL, WS_VERBATIM)),
     "plain and verbatim workspaces yield one identity for a Chinese/space path",
+  );
+}
+
+console.log("POSIX absolute path resolves into its workspace identity");
+{
+  const WS_POSIX = "/workspace";
+  const FILE = "/workspace/test.cpp";
+  ok(isAbsolutePath(FILE), "POSIX absolute path is recognised as absolute");
+  eq(resolveAgainstWorkspace(FILE, WS_POSIX), FILE, "absolute path is not re-rooted");
+  ok(isPathInsideWorkspace(FILE, WS_POSIX), "the file is inside the workspace");
+  ok(sameFile(FILE, resolveAgainstWorkspace("test.cpp", WS_POSIX)), "relative form matches");
+  eq(
+    canonicalPath("/lib64/libc.so.6`__libc_start_call_main"),
+    "/lib64/libc.so.6`__libc_start_call_main",
+    "a synthetic library path keeps its (non-existent) shape",
+  );
+  ok(
+    !isPathInsideWorkspace("/lib64/libc.so.6`__libc_start_call_main", WS_POSIX),
+    "a synthetic library path is outside the workspace (so it is not read)",
+  );
+}
+
+console.log("Windows verbatim and forward-slash paths share one identity");
+{
+  const VERBATIM = "\\\\?\\E:\\workspace\\test.cpp";
+  const SLASH = "E:/workspace/test.cpp";
+  eq(canonicalPath(VERBATIM), "E:/workspace/test.cpp", "verbatim prefix is stripped");
+  ok(sameFile(VERBATIM, SLASH), "both spellings are the same file");
+  ok(
+    isPathInsideWorkspace(VERBATIM, "\\\\?\\E:\\workspace"),
+    "verbatim path is inside a verbatim workspace",
+  );
+}
+
+console.log("matchingOpenPath reuses an already-open file");
+{
+  const open = ["/workspace/a.cpp", "/workspace/test.cpp"];
+  eq(matchingOpenPath(open, "/workspace/test.cpp"), "/workspace/test.cpp", "exact match");
+  eq(matchingOpenPath(open, "/workspace/other.cpp"), undefined, "unrelated path does not match");
+  eq(
+    matchingOpenPath(["\\\\?\\E:\\workspace\\test.cpp"], "E:/workspace/test.cpp"),
+    "\\\\?\\E:\\workspace\\test.cpp",
+    "verbatim open tab matches its forward-slash target",
   );
 }
 

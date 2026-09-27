@@ -1,6 +1,10 @@
 pub mod commands;
 mod config;
+/// Public so the end-to-end DAP test in `tests/` can drive a real adapter
+/// (`DebugSession::start(None, …)` runs without a Tauri app handle).
+pub mod debug;
 mod error;
+mod framing;
 mod git;
 mod lsp;
 mod session;
@@ -58,6 +62,9 @@ pub fn run() {
             commands::lsp::lsp_stop,
             commands::lsp::lsp_notify,
             commands::lsp::lsp_request,
+            commands::debug::debug_start,
+            commands::debug::debug_request,
+            commands::debug::debug_stop,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -67,6 +74,9 @@ pub fn run() {
             let state = app_handle.state::<AppState>();
             state.kill_all_terminals();
             state.stop_all_lsp();
+            // Terminate the debuggee too: closing the IDE must not leave a
+            // debugged process (or its adapter) running.
+            state.stop_debug();
         }
     });
 }

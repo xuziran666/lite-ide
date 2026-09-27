@@ -9,11 +9,13 @@
 //!   the results of `lsp_start` / `lsp_stop` / `lsp_notify` / `lsp_request`.
 //! - The reader thread never panics on unknown JSON-RPC shapes; unsupported
 //!   server requests are answered `-32601`.
+//!
+//! The `Content-Length` framing itself is shared with the DAP client and lives
+//! in [`crate::framing`].
 
 pub mod cpp;
 pub mod rpc;
 pub mod session;
-pub mod transport;
 pub mod uri;
 
 use std::path::Path;

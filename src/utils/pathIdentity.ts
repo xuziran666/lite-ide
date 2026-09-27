@@ -42,6 +42,21 @@ export function sameFile(a: string, b: string): boolean {
   return fileKey(a) === fileKey(b);
 }
 
+/**
+ * The first entry of `openPaths` that refers to the same physical file as
+ * `target`, or `undefined`.
+ *
+ * Used by navigation to reuse an already-open tab/model instead of reading the
+ * file again — which both preserves unsaved state and avoids a redundant (and,
+ * for a synthetic source, failing) read.
+ */
+export function matchingOpenPath(
+  openPaths: readonly string[],
+  target: string,
+): string | undefined {
+  return openPaths.find((path) => sameFile(path, target));
+}
+
 /** Whether a path is absolute (Windows drive, UNC, or POSIX root). */
 export function isAbsolutePath(path: string): boolean {
   const p = path.replace(/\\/g, "/");

@@ -194,12 +194,32 @@ export interface LspConfig {
   typescript: LspServerConfig;
 }
 
+/** One `debug.adapters.<languageId>` entry: the adapter executable to spawn. */
+export interface DebugAdapterConfig {
+  command: string;
+  args: string[];
+}
+
+/**
+ * The `debug` config section, keyed by language id.
+ *
+ * There are no built-in defaults: a language with no `adapters` entry reports
+ * "Debug adapter not configured" instead of the app guessing a debugger, and
+ * `launch` holds the DAP launch arguments verbatim (it belongs to the user and
+ * the adapter, so nothing here validates or rewrites it).
+ */
+export interface DebugConfig {
+  adapters: Record<string, DebugAdapterConfig>;
+  launch: Record<string, Record<string, unknown>>;
+}
+
 export interface UserConfig {
   keybindings: Record<string, string>;
   editor: EditorSettings;
   terminal: TerminalSettings;
   general: GeneralSettings;
   lsp: LspConfig;
+  debug: DebugConfig;
   files: FilesSettings;
   configDir: string;
   notice: string | null;
@@ -212,6 +232,7 @@ export interface UserConfigPatch {
   terminal: TerminalSettings;
   general: GeneralSettings;
   lsp: LspConfig;
+  debug: DebugConfig;
   files: FilesSettings;
 }
 
@@ -466,4 +487,56 @@ export function lspRequest(
   params: unknown,
 ): Promise<unknown> {
   return invoke<unknown>("lsp_request", { language, method, params });
+}
+/* ------------------------------------------------------------------ debug --
+ *
+ * The debug backend owns the adapter process, its stdio framing and request
+ * correlation. Three commands cover the whole protocol surface, so the frontend
+ * never needs bespoke plumbing.
+ *
+ * Note what `debugStart` does **not** do: it does not wait for the program to
+ * stop, and it does not send breakpoints. The `launch` response is deferred by
+ * the protocol (an adapter may withhold it until the debuggee first stops, and
+ * real `lldb-dap` does), and breakpoints are only bindable once the adapter
+ * reports `initialized` — which for the same adapter means after `launch`. The
+ * frontend drives the rest from the `debug-event` stream.
+ */
+
+export type { DapCapabilities, DebugStartResult } from "../debug/protocol";
+import type { DebugStartResult } from "../debug/protocol";
+
+/**
+ * Start a debug session for one language and send `launch` or `attach`.
+ *
+ * `request` mirrors the DAP request name and is chosen from the user's config
+ * (the `request` field, exactly as VS Code's `launch.json` does); it defaults to
+ * `"launch"`. The call resolves once the adapter has been told to start, *not*
+ * once the program stops — the stop arrives as a `debug-event`.
+ */
+export function debugStart(
+  language: string,
+  adapter: string[] | undefined,
+  launch: Record<string, unknown>,
+  request: "launch" | "attach" = "launch",
+): Promise<DebugStartResult> {
+  return invoke<DebugStartResult>("debug_start", {
+    language,
+    adapter,
+    request,
+    launch,
+  });
+}
+
+/** Send a DAP request to the running adapter and resolve with its `body`. */
+export function debugRequest(
+  command: string,
+  args?: unknown,
+): Promise<unknown> {
+  // `arguments` is the Rust parameter's name, so it is also the invoke key.
+  return invoke<unknown>("debug_request", { command, arguments: args });
+}
+
+/** Terminate the debuggee and stop the adapter. */
+export function debugStop(): Promise<void> {
+  return invoke<void>("debug_stop");
 }

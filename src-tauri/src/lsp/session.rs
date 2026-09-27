@@ -20,7 +20,7 @@ use crate::lsp::rpc::{
     build_notification, build_request, build_response, classify_message, reply_for_server_request,
     Incoming,
 };
-use crate::lsp::transport::{frame_message, write_message, FrameDecoder, TransportError};
+use crate::framing::{frame_message, write_message, FrameDecoder, TransportError};
 
 /// How long we wait for any LSP request before declaring it timed out.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);

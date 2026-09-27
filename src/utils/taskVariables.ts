@@ -1,4 +1,7 @@
-import { basename, dirname } from "./language";
+// The `.ts` extension matches `utils/gitStatusMapping.ts`: it lets Node load this
+// module directly for the debug launch-config test, which reuses the path
+// normalization below. Vite and tsc resolve both forms.
+import { basename, dirname } from "./language.ts";
 
 /**
  * Substitution variables supported in task commands. Both the workspace-based

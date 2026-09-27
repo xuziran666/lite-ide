@@ -4,13 +4,16 @@ import type { EditorSettings } from "../../commands";
 import { useEditorStore } from "../../stores/editorStore";
 import { useConfigStore } from "../../stores/configStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useDebugStore } from "../../stores/debugStore";
 import { getModel } from "../../editor/modelStore";
+import { openAndReveal } from "../../utils/reveal";
 import {
   autoSaveOnFocusChange,
   autoSaveOnWindowChange,
   cancelAutoSave,
   scheduleAutoSave,
 } from "../../utils/autoSave";
+import { installDebugDecorations } from "../../debug/editorDecorations";
 
 /** Exactly what `editor.updateOptions()` accepts: per-editor + global options. */
 export type MonacoEditorOptions = monaco.editor.IEditorOptions &
@@ -148,8 +151,13 @@ function Editor() {
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       wordWrap: "off",
+      // Always on so the breakpoint click target never moves when a debug
+      // session starts; the debug layer draws into it. Its width comes from
+      // Monaco (font-derived), so there is nothing to configure.
+      glyphMargin: true,
     });
     editorRef.current = editor;
+    const uninstallDebug = installDebugDecorations(editor);
 
     const pushCursor = () => {
       const model = editor.getModel();
@@ -192,6 +200,7 @@ function Editor() {
       for (const subscription of subscriptions) {
         subscription.dispose();
       }
+      uninstallDebug();
       editor.dispose();
       editorRef.current = null;
     };
@@ -250,6 +259,28 @@ function Editor() {
   // so it can never save into the next workspace.
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   useEffect(() => () => cancelAutoSave(), [workspacePath]);
+
+  // Follow the debugger's current execution location: when a stop (or a stack
+  // frame selection) changes it, open the source if needed and scroll it into
+  // view. The *highlight* is a decoration owned by the debug editor layer; this
+  // only navigates, so it works even while the Run and Debug sidebar is closed.
+  useEffect(() => {
+    let last: { path: string; line: number } | undefined;
+    return useDebugStore.subscribe((state) => {
+      const location = state.session.currentLocation;
+      if (!location) {
+        // Forget the previous location so a later stop on the same line still
+        // navigates after a continue/step cleared the marker.
+        last = undefined;
+        return;
+      }
+      if (last && last.path === location.path && last.line === location.line) {
+        return;
+      }
+      last = { path: location.path, line: location.line };
+      void openAndReveal(location.path, location.line);
+    });
+  }, []);
 
   // Editor: Mouse Wheel Zoom. Resizes the Monaco font (8..40, step 1) on
   // Ctrl/Cmd + wheel. The listener is scoped to the editor host so the

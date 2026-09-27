@@ -40,8 +40,13 @@ interface EditorStore {
   openFile: (path: string) => Promise<void>;
   openGlobalFile: (name: string, fallbackContent?: string) => Promise<void>;
   /** Open a file from outside the workspace (e.g. an LSP definition jump into
-   *  the standard library) as a read-only tab. Never dirty, never saveable. */
-  openExternalFile: (path: string) => Promise<void>;
+   *  the standard library) as a read-only tab. Never dirty, never saveable.
+   *  Resolves `false`, without setting an error, when `quiet` is set and the
+   *  source cannot be read (a debug/library frame with no real source). */
+  openExternalFile: (
+    path: string,
+    options?: { quiet?: boolean },
+  ) => Promise<boolean>;
   setActive: (path: string) => void;
   closeTab: (path: string, record?: boolean) => void;
   closeMany: (
@@ -212,26 +217,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     }));
   },
 
-  openExternalFile: async (path: string) => {
+  openExternalFile: async (path, options) => {
     const target = canonicalPath(path);
     const existing = get().openFiles.find((t) => sameFile(t.path, target));
     if (existing) {
       set({ activePath: existing.path, error: null });
-      return;
+      return true;
     }
 
     let content: string;
     try {
       content = await readExternalFile(target);
     } catch (e) {
-      set({ error: String(e) });
-      return;
+      // A source that cannot be read is normal for a debug/library frame. When
+      // the caller opted into `quiet`, the failure is reported only by the
+      // return value so navigation can silently do nothing.
+      if (!options?.quiet) {
+        set({ error: String(e) });
+      }
+      return false;
     }
 
     const raced = get().openFiles.find((t) => sameFile(t.path, target));
     if (raced) {
       set({ activePath: raced.path, error: null });
-      return;
+      return true;
     }
 
     // Read-only: never mark the tab dirty no matter what is typed, so closing
@@ -252,6 +262,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       activePath: target,
       error: null,
     }));
+    return true;
   },
 
   setActive: (path: string) => {

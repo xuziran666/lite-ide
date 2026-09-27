@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
 /// Actions users may rebind plus their defaults. `openTaskCenter` defaults to
@@ -46,6 +47,8 @@ pub struct UserConfigFile {
     #[serde(default)]
     pub lsp: LspConfigFile,
     #[serde(default)]
+    pub debug: DebugConfigFile,
+    #[serde(default)]
     pub files: FilesConfigFile,
 }
 
@@ -70,6 +73,35 @@ pub struct LspConfigFile {
     pub cpp: Option<LspServerFile>,
     #[serde(default)]
     pub typescript: Option<LspServerFile>,
+}
+
+/// `debug.*` in `user.json`.
+///
+/// Unlike `lsp`, this is keyed by **any** language id the user cares about:
+/// `adapters` maps a language id to the adapter executable, and `launch` maps a
+/// language id to the DAP launch arguments. Both are plain data — a new
+/// language is a `user.json` edit, never a code change. There are no built-in
+/// defaults, because guessing a debug adapter would be worse than reporting
+/// that none is configured.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugConfigFile {
+    /// languageId → adapter command line.
+    #[serde(default)]
+    pub adapters: HashMap<String, DebugAdapterFile>,
+    /// languageId → DAP `launch` request arguments, passed through verbatim.
+    #[serde(default)]
+    pub launch: HashMap<String, Value>,
+}
+
+/// One `debug.adapters.<languageId>` entry.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAdapterFile {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
 }
 
 /// `editor.guides.*` in `user.json`, nested so more guide options can be added
@@ -203,6 +235,7 @@ pub struct UserConfig {
     pub terminal: TerminalSettings,
     pub general: GeneralSettings,
     pub lsp: LspSettings,
+    pub debug: DebugSettings,
     pub files: FilesSettings,
     pub config_dir: String,
     pub notice: Option<String>,
@@ -384,6 +417,40 @@ pub struct LspSettings {
     pub typescript: LspServerSettings,
 }
 
+/// A resolved adapter command line. `command` is never empty: entries without
+/// one are dropped during resolution so the frontend only ever sees startable
+/// adapters.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAdapterSettings {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+/// The resolved debug configuration. Keys are lowercased language ids.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugSettings {
+    /// languageId → adapter command line.
+    pub adapters: HashMap<String, DebugAdapterSettings>,
+    /// languageId → DAP `launch` request arguments, forwarded verbatim.
+    pub launch: HashMap<String, Value>,
+}
+
+impl DebugSettings {
+    /// The adapter configured for a language id, or `None` when the language
+    /// has no usable entry — the caller reports that as "not configured"
+    /// rather than attempting a spawn.
+    pub fn adapter(&self, language: &str) -> Option<&DebugAdapterSettings> {
+        self.adapters.get(&language.trim().to_ascii_lowercase())
+    }
+
+    /// The stored launch configuration for a language id.
+    pub fn launch_config(&self, language: &str) -> Option<&Value> {
+        self.launch.get(&language.trim().to_ascii_lowercase())
+    }
+}
+
 fn server(command: &str, args: &[&str]) -> LspServerSettings {
     LspServerSettings {
         command: command.to_string(),
@@ -496,6 +563,50 @@ fn resolve_lsp(file: &LspConfigFile) -> LspSettings {
         cpp: sanitize_server(file.cpp.clone(), &defaults.cpp),
         typescript: sanitize_server(file.typescript.clone(), &defaults.typescript),
     }
+}
+
+/// Normalize the stored debug section for the frontend.
+///
+/// Three rules, all defensive because this is hand-edited JSON:
+/// - keys are lowercased, so `CPP`, `Cpp` and `cpp` all resolve;
+/// - an adapter with a blank command is **dropped**, not passed through as an
+///   empty string, so a half-written entry reports "not configured";
+/// - `launch` entries are passed through byte-for-byte. They are arbitrary DAP
+///   arguments and belong to the user and the adapter, so this layer never
+///   validates, rewrites or fills them in.
+fn resolve_debug(file: &DebugConfigFile) -> DebugSettings {
+    let mut adapters = HashMap::new();
+    for (language, entry) in &file.adapters {
+        let key = language.trim().to_ascii_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        let Some(command) = entry.command.as_ref().map(|c| c.trim().to_string()) else {
+            continue;
+        };
+        if command.is_empty() {
+            continue;
+        }
+        let args = entry
+            .args
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+        adapters.insert(key, DebugAdapterSettings { command, args });
+    }
+
+    let mut launch = HashMap::new();
+    for (language, args) in &file.launch {
+        let key = language.trim().to_ascii_lowercase();
+        if !key.is_empty() && args.is_object() {
+            launch.insert(key, args.clone());
+        }
+    }
+
+    DebugSettings { adapters, launch }
 }
 
 /// Clamp and fill optional user file values before persisting them.
@@ -636,9 +747,11 @@ fn parse_user_config(text: &str) -> UserConfig {
     let terminal = TerminalSettings::default();
     let general = GeneralSettings::default();
     let lsp = LspSettings::default();
+    let debug = DebugSettings::default();
     match serde_json::from_str::<UserConfigFile>(text) {
         Ok(file) => {
             let lsp = resolve_lsp(&file.lsp);
+            let debug = resolve_debug(&file.debug);
             let file = sanitize_file(file);
             let mut keybindings = keybindings;
             for (action, chord) in &file.keybindings {
@@ -747,6 +860,7 @@ fn parse_user_config(text: &str) -> UserConfig {
                     theme: file.general.theme.unwrap_or_else(|| "dark".to_string()),
                 },
                 lsp,
+                debug,
                 files: FilesSettings {
                     auto_save: AutoSaveSettings {
                         after_delay: file.files.auto_save.after_delay.unwrap_or(false),
@@ -765,6 +879,7 @@ fn parse_user_config(text: &str) -> UserConfig {
             terminal,
             general,
             lsp,
+            debug,
             files: FilesSettings::default(),
             config_dir: String::new(),
             notice: Some("user.json 格式错误，已使用默认配置".to_string()),
@@ -794,6 +909,7 @@ pub fn load(app: &AppHandle) -> UserConfig {
         terminal: TerminalSettings::default(),
         general: GeneralSettings::default(),
         lsp: LspSettings::default(),
+        debug: DebugSettings::default(),
         files: FilesSettings::default(),
         config_dir: config_dir.clone(),
         notice: None,
@@ -849,10 +965,11 @@ pub fn configured_shell(app: &AppHandle) -> String {
 mod tests {
     use super::{
         defaults, parse_user_config, sanitize_file, AutoSaveSettings,
-        BracketPairColorizationSettings, EditorSettings, FilesSettings, GeneralSettings,
-        GuidesSettings, LspSettings, TerminalSettings, UserConfig, UserConfigFile,
-        DEFAULT_FONT_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE,
+        BracketPairColorizationSettings, DebugAdapterSettings, DebugSettings, EditorSettings,
+        FilesSettings, GeneralSettings, GuidesSettings, LspSettings, TerminalSettings, UserConfig,
+        UserConfigFile, DEFAULT_FONT_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE,
     };
+    use std::collections::HashMap;
 
     #[test]
     fn defaults_cover_every_action() {
@@ -1188,6 +1305,84 @@ mod tests {
     }
 
     #[test]
+    fn debug_defaults_to_no_adapters() {
+        // Guessing a debug adapter would be worse than saying "not configured",
+        // so an empty file must resolve to an empty map, not to a default.
+        let cfg = parse_user_config("{}");
+        assert!(cfg.debug.adapters.is_empty());
+        assert!(cfg.debug.launch.is_empty());
+        assert!(cfg.debug.adapter("cpp").is_none());
+    }
+
+    #[test]
+    fn parses_debug_adapters_and_launch_arguments() {
+        let cfg = parse_user_config(
+            r#"{"debug":{"adapters":{"cpp":{"command":"  lldb-dap  ","args":["--x"]}},
+                 "launch":{"cpp":{"program":"${workspaceFolder}/build/app","stopOnEntry":true}}}}"#,
+        );
+        let cpp = cfg.debug.adapter("cpp").expect("cpp adapter");
+        assert_eq!(cpp.command, "lldb-dap");
+        assert_eq!(cpp.args, vec!["--x".to_string()]);
+        let launch = cfg.debug.launch_config("cpp").expect("cpp launch");
+        assert_eq!(launch["program"], "${workspaceFolder}/build/app");
+        assert_eq!(launch["stopOnEntry"], true);
+    }
+
+    #[test]
+    fn debug_adapters_are_language_agnostic() {
+        // Same code path for every language: nothing here knows "cpp".
+        let cfg = parse_user_config(
+            r#"{"debug":{"adapters":{"Rust":{"command":"lldb-dap"},"go":{"command":"dlv"}}}}"#,
+        );
+        assert_eq!(cfg.debug.adapter("rust").unwrap().command, "lldb-dap");
+        assert_eq!(cfg.debug.adapter("go").unwrap().command, "dlv");
+        // Unknown languages simply have no adapter.
+        assert!(cfg.debug.adapter("python").is_none());
+    }
+
+    #[test]
+    fn blank_debug_adapter_commands_are_dropped() {
+        // A half-edited entry must read as "not configured" rather than
+        // reaching the spawn step as an empty command.
+        let cfg = parse_user_config(
+            r#"{"debug":{"adapters":{"cpp":{"command":"   "},"go":{"command":"dlv","args":["  ",""]}}}}"#,
+        );
+        assert!(cfg.debug.adapter("cpp").is_none());
+        let go = cfg.debug.adapter("go").expect("go adapter");
+        assert_eq!(go.command, "dlv");
+        assert!(go.args.is_empty(), "blank args are dropped: {go:?}");
+    }
+
+    #[test]
+    fn malformed_debug_launch_entries_are_ignored() {
+        let cfg = parse_user_config(
+            r#"{"debug":{"launch":{"cpp":"not-an-object","go":{"program":"a"},"":{"x":1}}}}"#,
+        );
+        assert!(cfg.debug.launch_config("cpp").is_none());
+        assert!(cfg.debug.launch_config("").is_none());
+        assert_eq!(cfg.debug.launch_config("go").unwrap()["program"], "a");
+    }
+
+    #[test]
+    fn debug_section_survives_a_full_config_rewrite() {
+        // `save` re-serializes the whole `UserConfigFile`, so the debug section
+        // must be part of the stored shape or every other settings save would
+        // silently delete the user's adapters.
+        let file: UserConfigFile = serde_json::from_str(
+            r#"{"debug":{"adapters":{"cpp":{"command":"lldb-dap","args":[]}},
+                 "launch":{"cpp":{"program":"a.out"}}}}"#,
+        )
+        .expect("debug section parses");
+        let text = serde_json::to_string(&file).expect("serializes");
+        assert!(text.contains(r#""adapters":{"cpp":{"command":"lldb-dap""#), "{text}");
+        assert!(text.contains(r#""launch":{"cpp":{"program":"a.out"}}"#), "{text}");
+
+        let round_tripped: UserConfigFile = serde_json::from_str(&text).expect("round trips");
+        let resolved = super::resolve_debug(&round_tripped.debug);
+        assert_eq!(resolved.adapter("cpp").unwrap().command, "lldb-dap");
+    }
+
+    #[test]
     fn serializes_settings_with_camel_case_keys() {
         let cfg = UserConfig {
             keybindings: defaults(),
@@ -1230,6 +1425,19 @@ mod tests {
                 theme: "dark".to_string(),
             },
             lsp: LspSettings::default(),
+            debug: DebugSettings {
+                adapters: HashMap::from([(
+                    "cpp".to_string(),
+                    DebugAdapterSettings {
+                        command: "lldb-dap".to_string(),
+                        args: vec![],
+                    },
+                )]),
+                launch: HashMap::from([(
+                    "cpp".to_string(),
+                    serde_json::json!({"program": "${workspaceFolder}/build/app"}),
+                )]),
+            },
             files: FilesSettings {
                 auto_save: AutoSaveSettings {
                     after_delay: true,
@@ -1290,6 +1498,11 @@ mod tests {
         );
         assert!(text.contains(r#""restoreLastWorkspace":false"#), "{text}");
         assert!(text.contains(r#""confirmBeforeClose":false"#), "{text}");
+        assert!(text.contains(r#""adapters":{"cpp":{"command":"lldb-dap""#), "{text}");
+        assert!(
+            text.contains(r#""launch":{"cpp":{"program":"${workspaceFolder}/build/app"}}"#),
+            "{text}"
+        );
         assert!(text.contains(r#""autoSave":{"afterDelay":true"#), "{text}");
         assert!(text.contains(r#""delay":1000"#), "{text}");
         assert!(text.contains(r#""typescript":{"command":"typescript-language-server","args":["--stdio"]}"#), "{text}");

@@ -4,6 +4,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import FileTree from "../FileTree/FileTree";
 import SourceControlPanel from "../SourceControl/SourceControlPanel";
 import TasksPanel from "../Tasks/TasksPanel";
+import DebugPanel from "../Debug/DebugPanel";
+import DebugFloatToolbar from "../Debug/DebugFloatToolbar";
 import Tabs from "../Editor/Tabs";
 import Editor from "../Editor/Editor";
 import DiffView from "../DiffView/DiffView";
@@ -21,7 +23,7 @@ import QuickOpen from "../Search/QuickOpen";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
-import { useTerminalStore } from "../../stores/terminalStore";
+import { useTerminalStore, DEBUG_TERMINAL_ID } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useSearchStore } from "../../stores/searchStore";
 import { useConfigStore } from "../../stores/configStore";
@@ -41,7 +43,15 @@ import {
   parseChord,
   chordMatches,
   type KeybindingAction,
+  type KeybindingMap,
 } from "../../config/keybindings";
+import {
+  startOrContinue,
+  stepInto,
+  stepOut,
+  stepOver,
+  stopSession,
+} from "../../debug/session";
 import { cancelAutoSave } from "../../utils/autoSave";
 
 const MIN_TREE_WIDTH = 180;
@@ -55,6 +65,53 @@ const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Dispatch a debug shortcut, returning true when the event was consumed.
+ *
+ * These five actions are matched here, ahead of the Ctrl/Meta-gated handler,
+ * because their defaults are bare function keys. They never claim the keyboard
+ * while a text input has focus, so typing "F5" into a config field is still
+ * typing — and a user who rebinds one of them to a chord keeps working exactly
+ * the same way, because the user's binding is what is matched.
+ */
+function runDebugKeybinding(
+  e: KeyboardEvent,
+  keybindings: KeybindingMap,
+): boolean {
+  if (e.altKey || e.ctrlKey || e.metaKey) return false;
+  const match = (action: KeybindingAction) =>
+    chordMatches(parseChord(keybindings[action]), e);
+  const inTextInput = isTextInputFocused();
+
+  if (match("debugStartContinue")) {
+    e.preventDefault();
+    void startOrContinue();
+    return true;
+  }
+  if (match("debugStepOver")) {
+    e.preventDefault();
+    void stepOver();
+    return true;
+  }
+  if (match("debugStepInto")) {
+    e.preventDefault();
+    void stepInto();
+    return true;
+  }
+  if (match("debugStepOut")) {
+    e.preventDefault();
+    void stepOut();
+    return true;
+  }
+  if (match("debugStop")) {
+    if (inTextInput) return false;
+    e.preventDefault();
+    void stopSession();
+    return true;
+  }
+  return false;
 }
 
 function terminalMaxHeight(): number {
@@ -210,6 +267,15 @@ function AppLayout() {
     if (taskTerminalId != null) useTerminalStore.getState().select(taskTerminalId);
   }, [taskRunSeq]);
 
+  // Starting a debug session reveals the terminal panel and focuses the Debug
+  // Terminal, exactly like a task run.
+  const debugTerminalRevealSeq = useTerminalStore((s) => s.revealSeq);
+  useEffect(() => {
+    if (debugTerminalRevealSeq === 0) return;
+    setTerminalCollapsed(false);
+    useTerminalStore.getState().select(DEBUG_TERMINAL_ID);
+  }, [debugTerminalRevealSeq]);
+
   // Keep the tree in sync with the file that owns the active tab.
   useEffect(() => {
     if (!activePath) return;
@@ -248,6 +314,13 @@ function AppLayout() {
       if (useTaskStore.getState().taskCenterOpen) return;
 
       const keybindings = useConfigStore.getState().keybindings;
+
+      // Debug shortcuts are checked before the Ctrl/Meta guard below, because
+      // they are allowed to be bare function keys (F5, F10, F11, …). They are
+      // the only actions that bypass the modifier requirement — see
+      // BARE_FUNCTION_KEY_ACTIONS in config/keybindings.ts.
+      if (runDebugKeybinding(e, keybindings)) return;
+
       const taskChord = keybindings.openTaskCenter;
 
       // The default Task Center chord is the special double-Ctrl: two quick
@@ -487,6 +560,15 @@ function AppLayout() {
                     >
                       <TasksPanel />
                     </div>
+                    <div
+                      className={
+                        activePrimarySidebar === "debug"
+                          ? "primary-sidebar-view"
+                          : "primary-sidebar-view hidden"
+                      }
+                    >
+                      <DebugPanel />
+                    </div>
                   </div>
                   <Splitter orientation="vertical" onDrag={handleFileTreeDrag} />
                 </>
@@ -512,6 +594,8 @@ function AppLayout() {
                 <div className="editor-stack">
                   <Editor />
                   {diffOpen && <DiffView />}
+                  {/* Absolute overlay: does not take part in the editor's layout. */}
+                  <DebugFloatToolbar />
                 </div>
               </div>
             </div>

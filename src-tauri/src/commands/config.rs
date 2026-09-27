@@ -6,7 +6,11 @@ use crate::config::{app_config_dir, UserConfig, UserConfigFile};
 
 /// Global configuration files the Settings UI may open/edit. Everything else
 /// is rejected so the commands cannot touch arbitrary paths.
-const GLOBAL_CONFIG_FILES: &[&str] = &["tasks.json"];
+///
+/// `user.json` is the same file `crate::config::load`/`save` use; allowing it
+/// here is what lets the Debug settings section open the real global config in
+/// the editor instead of creating a second copy under the workspace.
+const GLOBAL_CONFIG_FILES: &[&str] = &["tasks.json", "user.json"];
 
 fn global_file_path(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String> {
     let dir =

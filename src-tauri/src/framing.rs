@@ -1,21 +1,29 @@
-//! LSP stdio transport.
+//! `Content-Length` message framing shared by every stdio child process.
 //!
-//! LSP clients exchange JSON-RPC messages over stdin/stdout using HTTP-like
-//! framing:
+//! Both protocols this app speaks to a child process over stdin/stdout use the
+//! same HTTP-like framing — LSP (JSON-RPC 2.0) and the Debug Adapter Protocol
+//! are specified identically here:
 //!
 //! ```text
 //! Content-Length: <n>\r\n
+//! [optional extra headers, e.g. Content-Type]\r\n
 //! \r\n
 //! <exactly n bytes of UTF-8 JSON>
 //! ```
 //!
-//! A single `read()` from the server can deliver half a header, several frames
+//! A single `read()` from the child can deliver half a header, several frames
 //! at once, or the body in separate chunks, so decoding must be incremental.
-//! `FrameDecoder` buffers raw bytes and yields complete messages only.
+//! `FrameDecoder` buffers raw bytes and yields complete message bodies only.
+//!
+//! `Content-Length` counts **UTF-8 bytes**, not characters, which is why the
+//! decoder works on `&[u8]` and never on a decoded `String`.
+//!
+//! Protocol semantics live above this layer: see `lsp::rpc` for JSON-RPC 2.0
+//! and `debug::transport` for DAP messages.
 
 use std::io::Write;
 
-/// Error while reading or writing a framed LSP message.
+/// Error while reading or writing a framed message.
 #[derive(Debug)]
 pub enum TransportError {
     Io(std::io::Error),
@@ -30,11 +38,11 @@ pub enum TransportError {
 impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TransportError::Io(e) => write!(f, "server stream error: {e}"),
+            TransportError::Io(e) => write!(f, "child process stream error: {e}"),
             TransportError::MalformedHeader => {
                 write!(f, "malformed Content-Length header")
             }
-            TransportError::UnexpectedEof => write!(f, "server stream ended unexpectedly"),
+            TransportError::UnexpectedEof => write!(f, "child process stream ended unexpectedly"),
             TransportError::InvalidJson(msg) => write!(f, "invalid JSON payload: {msg}"),
         }
     }
@@ -128,7 +136,7 @@ fn parse_content_length(header: &[u8]) -> Result<usize, TransportError> {
     Err(TransportError::MalformedHeader)
 }
 
-/// Wrap a JSON payload in the LSP `Content-Length` framing.
+/// Wrap a JSON payload in the `Content-Length` framing.
 pub fn frame_message(payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(64 + payload.len());
     out.extend_from_slice(format!("Content-Length: {}\r\n\r\n", payload.len()).as_bytes());
@@ -136,8 +144,8 @@ pub fn frame_message(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Write one framed message to the server stdin. A single write of the whole
-/// frame keeps concurrent senders from interleaving partial messages.
+/// Write one framed message to a child process' stdin. A single write of the
+/// whole frame keeps concurrent senders from interleaving partial messages.
 pub fn write_message(writer: &mut impl Write, framed: &[u8]) -> Result<(), TransportError> {
     writer
         .write_all(framed)
@@ -161,6 +169,19 @@ mod tests {
         let body = dec.yield_message().unwrap().expect("one message");
         assert_eq!(String::from_utf8(body).unwrap(), json);
         assert_eq!(dec.buffer_len(), 0);
+    }
+
+    #[test]
+    fn content_length_counts_utf8_bytes_not_characters() {
+        // "参数" is 6 bytes but 2 characters: a decoder that measured
+        // characters would cut the body in half and emit invalid JSON.
+        let json = r#"{"command":"stackTrace","note":"参数 ✓"}"#;
+        let body = json.as_bytes();
+        assert!(body.len() > json.chars().count());
+        let mut dec = FrameDecoder::new();
+        dec.push(&frame_of(json));
+        let decoded = dec.yield_message().unwrap().expect("one message");
+        assert_eq!(String::from_utf8(decoded).unwrap(), json);
     }
 
     #[test]
@@ -230,6 +251,36 @@ let header_end = 20;
     fn parses_length_between_headers_and_other_indexes() {
         let frame = format!("Content-Length: {}\r\n\r\n", 2).into_bytes();
         assert_eq!(parse_content_length(&frame).unwrap(), 2);
+    }
+
+    #[test]
+    fn ignores_other_header_lines() {
+        // DAP adapters routinely send a Content-Type next to Content-Length.
+        let payload = r#"{"seq":1}"#;
+        let header = format!(
+            "Content-Length: {}\r\nContent-Type: application/vnd.debugadapter+json; charset=utf8\r\n\r\n",
+            payload.len()
+        );
+        let mut frame = header.into_bytes();
+        frame.extend_from_slice(payload.as_bytes());
+
+        let mut dec = FrameDecoder::new();
+        dec.push(&frame);
+        assert_eq!(
+            String::from_utf8(dec.yield_message().unwrap().unwrap()).unwrap(),
+            payload
+        );
+    }
+
+    #[test]
+    fn rejects_content_length_beyond_the_limit() {
+        let mut dec = FrameDecoder::new();
+        let mut frame = format!("Content-Length: {}\r\n\r\n", MAX_MESSAGE + 1).into_bytes();
+        // At least one body byte, so the header is complete and the length is
+        // actually inspected instead of being treated as a partial message.
+        frame.push(b'{');
+        dec.push(&frame);
+        assert!(matches!(dec.yield_message(), Err(TransportError::MalformedHeader)));
     }
 
     #[test]

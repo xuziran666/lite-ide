@@ -1,5 +1,6 @@
 import { useTaskStore } from "../../stores/taskStore";
 import { useConfigStore } from "../../stores/configStore";
+import { useDebugStore } from "../../stores/debugStore";
 import { useSearchStore, type PrimarySidebarView } from "../../stores/searchStore";
 
 function ExplorerIcon() {
@@ -46,6 +47,17 @@ function TasksIcon() {
   );
 }
 
+function RunDebugIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      {/* A play triangle over a bug: the debug glyph, drawn rather than
+          imported so the Activity Bar has no icon-font dependency. */}
+      <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.4" fill="none" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  );
+}
+
 function SettingsIcon() {
   return (
     <svg
@@ -63,6 +75,11 @@ function SettingsIcon() {
 
 function ActivityBar() {
   const taskRunning = useTaskStore((s) => s.taskStatus === "running");
+  // Only a live session earns the badge: a finished or crashed one has nothing
+  // left to report, and a permanent dot would be noise.
+  const debugging = useDebugStore(
+    (s) => s.session.status === "running" || s.session.status === "stopped",
+  );
   const settingsOpen = useConfigStore((s) => s.settingsOpen);
   const openSettings = useConfigStore((s) => s.openSettings);
   const closeSettings = useConfigStore((s) => s.closeSettings);
@@ -112,6 +129,21 @@ function ActivityBar() {
           onClick={() => select("tasks")}
         >
           <TasksIcon />
+        </button>
+        <button
+          type="button"
+          className={
+            activePrimarySidebar === "debug"
+              ? "activity-bar-button active"
+              : "activity-bar-button"
+          }
+          title="运行和调试"
+          onClick={() => select("debug")}
+        >
+          <RunDebugIcon />
+          {/* A running debuggee is worth seeing from anywhere in the IDE, not
+              only with the panel open. */}
+          {debugging && <span className="activity-bar-badge" />}
         </button>
       </div>
       <div className="activity-bar-bottom">

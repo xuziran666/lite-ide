@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 /// Locate an executable by name on the `PATH`. Returns the first match.
 #[cfg(windows)]
 pub fn find_executable(name: &str) -> Option<PathBuf> {

@@ -5,6 +5,7 @@ import EditorSection from "./EditorSection";
 import FilesSection from "./FilesSection";
 import TerminalSection from "./TerminalSection";
 import TasksSection from "./TasksSection";
+import DebugSection from "./DebugSection";
 import KeyboardSection from "./KeyboardSection";
 
 type SettingsSection =
@@ -13,6 +14,7 @@ type SettingsSection =
   | "files"
   | "terminal"
   | "tasks"
+  | "debug"
   | "keyboard";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -21,6 +23,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "files", label: "文件" },
   { id: "terminal", label: "终端" },
   { id: "tasks", label: "任务" },
+  { id: "debug", label: "调试" },
   { id: "keyboard", label: "键盘快捷键" },
 ];
 
@@ -64,6 +67,7 @@ function SettingsView() {
           {section === "files" && <FilesSection />}
           {section === "terminal" && <TerminalSection />}
           {section === "tasks" && <TasksSection />}
+          {section === "debug" && <DebugSection />}
           {section === "keyboard" && <KeyboardSection />}
         </div>
       </div>

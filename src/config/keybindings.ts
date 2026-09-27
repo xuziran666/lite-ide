@@ -16,11 +16,33 @@ export const KEYBINDING_ACTIONS = [
   "formatDocument",
   "signatureHelp",
   "deleteLine",
+  "debugStartContinue",
+  "debugStepOver",
+  "debugStepInto",
+  "debugStepOut",
+  "debugStop",
 ] as const;
 
 export type KeybindingAction = (typeof KEYBINDING_ACTIONS)[number];
 
 export type KeybindingMap = Record<KeybindingAction, string>;
+
+/**
+ * Actions that may be bound to a bare function key, with no Ctrl/Alt modifier.
+ *
+ * Debugging is the one place where this is the expected ergonomic: F5/F10/F11 are
+ * muscle memory for every programmer, and inside the editor nothing else claims
+ * them. Restricting the exemption to this list is what keeps a bare F5 from
+ * stealing a key that an existing action uses — every other action still needs a
+ * modifier, so `Ctrl+…` bindings behave exactly as before.
+ */
+export const BARE_FUNCTION_KEY_ACTIONS: readonly KeybindingAction[] = [
+  "debugStartContinue",
+  "debugStepOver",
+  "debugStepInto",
+  "debugStepOut",
+  "debugStop",
+];
 
 /** Defaults, used until user.json data arrives from the backend. */
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
@@ -40,6 +62,11 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
   formatDocument: "Shift+Alt+F",
   signatureHelp: "Ctrl+Shift+Space",
   deleteLine: "Ctrl+Y",
+  debugStartContinue: "F5",
+  debugStepOver: "F10",
+  debugStepInto: "F11",
+  debugStepOut: "Shift+F11",
+  debugStop: "Shift+F5",
 };
 
 /**
@@ -130,6 +157,11 @@ export const KEYBINDING_LABELS: Record<KeybindingAction, string> = {
   formatDocument: "Format Document",
   signatureHelp: "Signature Help",
   deleteLine: "Delete Line",
+  debugStartContinue: "Start / Continue Debugging",
+  debugStepOver: "Step Over",
+  debugStepInto: "Step Into",
+  debugStepOut: "Step Out",
+  debugStop: "Stop Debugging",
 };
 
 /**
@@ -183,13 +215,33 @@ export function chordFromEvent(e: KeyboardEvent): string | null {
 }
 
 /**
- * Whether a chord is acceptable as a user-recorded shortcut. Ordinary chords
- * must include Ctrl or Meta and must not include Alt; the special `Ctrl+Ctrl`
- * double-press is allowed so `openTaskCenter` keeps its default behavior.
+ * Whether a chord is acceptable as a user-recorded shortcut.
+ *
+ * Three shapes are allowed:
+ * - the special `Ctrl+Ctrl` double-press, so `openTaskCenter` keeps its default;
+ * - an ordinary chord with Ctrl or Meta and without Alt, which is what every
+ *   non-debug action uses;
+ * - a bare (or Shift-only) function key, but only for the debug actions listed in
+ *   `BARE_FUNCTION_KEY_ACTIONS`. Alt is still rejected everywhere, and a bare
+ *   non-function key (`Shift+A`, say) is rejected too, so the exemption cannot
+ *   grow by accident.
  */
-export function isUsableShortcut(chord: string): boolean {
+export function isUsableShortcut(
+  chord: string,
+  action?: KeybindingAction,
+): boolean {
   if (isDoubleCtrlChord(chord)) return true;
   const parsed = parseChord(chord);
   if (!parsed) return false;
-  return (parsed.ctrl || parsed.meta) && !parsed.alt;
+  if (parsed.alt) return false;
+  if (parsed.ctrl || parsed.meta) return true;
+  if (action && BARE_FUNCTION_KEY_ACTIONS.includes(action) && isFunctionKey(parsed.key)) {
+    return true;
+  }
+  return false;
+}
+
+/** `F1`–`F24`; the only keys allowed to be bound without a modifier. */
+export function isFunctionKey(key: string): boolean {
+  return /^F([1-9]|1\d|2[0-4])$/.test(key);
 }
