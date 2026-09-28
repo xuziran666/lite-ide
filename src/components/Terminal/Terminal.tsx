@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -13,6 +13,8 @@ import {
 import {
   useTerminalStore,
   DEBUG_TERMINAL_ID,
+  type TerminalDock,
+  type TerminalRecord,
 } from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useConfigStore } from "../../stores/configStore";
@@ -25,14 +27,26 @@ function sleep(ms: number): Promise<void> {
 /** How long to wait after Ctrl+C before starting the next task. */
 const INTERRUPT_WAIT_MS = 350;
 
-interface TerminalInstanceApi {
+function terminalTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) =>
+    styles.getPropertyValue(name).trim() || fallback;
+  return {
+    background: token("--vo-color-1e1e1e", "#1e1e1e"),
+    foreground: token("--vo-color-d4d4d4", "#d4d4d4"),
+    cursor: token("--vo-color-d4d4d4", "#d4d4d4"),
+    selectionBackground: "#264f78",
+  };
+}
+
+export interface TerminalInstanceApi {
   clear: () => void;
   restart: () => void;
 }
 
 /** Live registry of every mounted instance, keyed by terminal id, so the pane
  * toolbar can drive the active terminal without remounting anything. */
-interface InstanceRegistry {
+export interface TerminalInstanceRegistry {
   current: Map<number, TerminalInstanceApi>;
 }
 
@@ -85,6 +99,7 @@ function usePtySession(id: number, active: boolean) {
       cursorStyle: "block",
       fontFamily: initial.terminal.fontFamily,
       fontSize: initial.terminal.fontSize,
+      theme: terminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -187,6 +202,14 @@ function usePtySession(id: number, active: boolean) {
       fitAndReport();
     });
 
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = terminalTheme();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     chainRef.current = chainRef.current
       .then(() => terminalKill(id).catch(() => undefined))
       .then(() => terminalSpawn(id, channel))
@@ -202,6 +225,7 @@ function usePtySession(id: number, active: boolean) {
     return () => {
       versionRef.current += 1;
       unsubFont();
+      themeObserver.disconnect();
       chainRef.current = chainRef.current.then(() =>
         terminalKill(id).catch(() => undefined),
       );
@@ -254,10 +278,16 @@ function usePtySession(id: number, active: boolean) {
 interface TerminalInstanceProps {
   id: number;
   active: boolean;
-  instances: InstanceRegistry;
+  instances: TerminalInstanceRegistry;
+  frameStyle: CSSProperties;
 }
 
-function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
+function TerminalInstance({
+  id,
+  active,
+  instances,
+  frameStyle,
+}: TerminalInstanceProps) {
   const { hostRef, termRef, restart, exited } = usePtySession(id, active);
 
   // Publish the instance actions so the pane toolbar can target the active one.
@@ -277,7 +307,7 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
   return (
     <div
       className={active ? "terminal-instance active" : "terminal-instance"}
-      style={{ display: active ? undefined : "none" }}
+      style={{ ...frameStyle, display: active ? "flex" : "none" }}
     >
       <div className="terminal-host" ref={hostRef} />
       {exited && (
@@ -295,7 +325,8 @@ function TerminalInstance({ id, active, instances }: TerminalInstanceProps) {
 interface TaskTerminalInstanceProps {
   id: number;
   active: boolean;
-  instances: InstanceRegistry;
+  instances: TerminalInstanceRegistry;
+  frameStyle: CSSProperties;
 }
 
 /**
@@ -309,6 +340,7 @@ function TaskTerminalInstance({
   id,
   active,
   instances,
+  frameStyle,
 }: TaskTerminalInstanceProps) {
   const { hostRef, termRef, restart, exited, spawnedOnceRef, runAfterSpawn } =
     usePtySession(id, active);
@@ -373,7 +405,7 @@ function TaskTerminalInstance({
   return (
     <div
       className={active ? "terminal-instance active" : "terminal-instance"}
-      style={{ display: active ? undefined : "none" }}
+      style={{ ...frameStyle, display: active ? "flex" : "none" }}
     >
       <div className="terminal-host" ref={hostRef} />
       {exited && (
@@ -389,7 +421,12 @@ function TaskTerminalInstance({
 }
 
 interface TerminalPaneProps {
-  onCollapse: () => void;
+  dock: TerminalDock;
+  instances: TerminalInstanceRegistry;
+  showTabs?: boolean;
+  onCollapse?: () => void;
+  onDragStart: (id: number) => void;
+  onDragEnd: () => void;
 }
 
 /**
@@ -406,9 +443,11 @@ interface TerminalPaneProps {
 function DebugTerminalInstance({
   active,
   instances,
+  frameStyle,
 }: {
   active: boolean;
-  instances: InstanceRegistry;
+  instances: TerminalInstanceRegistry;
+  frameStyle: CSSProperties;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -432,6 +471,7 @@ function DebugTerminalInstance({
       cursorStyle: "block",
       fontFamily: initial.terminal.fontFamily,
       fontSize: initial.terminal.fontSize,
+      theme: terminalTheme(),
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -490,8 +530,17 @@ function DebugTerminalInstance({
       fitAndReport();
     });
 
+    const themeObserver = new MutationObserver(() => {
+      term.options.theme = terminalTheme();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+
     return () => {
       unsubFont();
+      themeObserver.disconnect();
       resizeObserver.disconnect();
       webgl?.dispose();
       term.dispose();
@@ -527,7 +576,7 @@ function DebugTerminalInstance({
   return (
     <div
       className={active ? "terminal-instance active" : "terminal-instance"}
-      style={{ display: active ? undefined : "none" }}
+      style={{ ...frameStyle, display: active ? "flex" : "none" }}
     >
       <div className="terminal-host" ref={hostRef} />
       {exited && (
@@ -539,15 +588,23 @@ function DebugTerminalInstance({
   );
 }
 
-function TerminalPane({ onCollapse }: TerminalPaneProps) {
-  const terminals = useTerminalStore((s) => s.terminals);
-  const activeId = useTerminalStore((s) => s.activeId);
+function TerminalPane({
+  dock,
+  instances,
+  showTabs = true,
+  onCollapse,
+  onDragStart,
+  onDragEnd,
+}: TerminalPaneProps) {
+  const allTerminals = useTerminalStore((s) => s.terminals);
+  const terminals = allTerminals.filter((terminal) => terminal.dock === dock);
+  const activeId = useTerminalStore((s) => s.activeIdByDock[dock]);
+  const activeTerminal = terminals.find((terminal) => terminal.id === activeId);
   const create = useTerminalStore((s) => s.create);
   const close = useTerminalStore((s) => s.close);
   const select = useTerminalStore((s) => s.select);
   const taskTerminalId = useTaskStore((s) => s.taskTerminalId);
   const taskRunning = useTaskStore((s) => s.taskStatus === "running");
-  const instances = useRef(new Map<number, TerminalInstanceApi>());
 
   const taskTab =
     terminals.find((t) => t.id === taskTerminalId) ?? null;
@@ -566,69 +623,98 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
     instances.current.get(activeId)?.restart();
   };
 
-  const closeActive = () => {
-    if (activeId == null) return;
-    close(activeId);
-  };
+  const renderTab = (terminal: TerminalRecord, label: string, className = "") => (
+    <div
+      key={terminal.id}
+      className={
+        terminal.id === activeId
+          ? `terminal-tab-group active ${className}`
+          : `terminal-tab-group ${className}`
+      }
+      draggable
+      onDragStart={(event) => {
+        if ((event.target as HTMLElement).closest(".terminal-tab-close")) {
+          event.preventDefault();
+          return;
+        }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(
+          "application/x-lite-ide-terminal",
+          String(terminal.id),
+        );
+        onDragStart(terminal.id);
+      }}
+      onDragEnd={onDragEnd}
+    >
+      <button
+        type="button"
+        className={
+          terminal.id === activeId
+            ? `terminal-tab active ${className}`
+            : `terminal-tab ${className}`
+        }
+        title={terminal.name}
+        onClick={() => select(terminal.id)}
+      >
+        {label}
+      </button>
+      <button
+        type="button"
+        className="terminal-tab-close"
+        title={`关闭 ${terminal.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          close(terminal.id);
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
 
   return (
     <section className="terminal-pane">
       <div className="terminal-toolbar">
-        <div className="terminal-tabs">
-          {taskTab && (
+        {showTabs ? (
+          <div className="terminal-tabs">
+            {taskTab && renderTab(taskTab, `任务${taskRunning ? " ●" : ""}`, "task")}
+            {debugTab &&
+              renderTab(
+                debugTab,
+                `${debugTab.name}${debugTab.exited ? " (已退出)" : ""}`,
+                "debug",
+              )}
+            {normalTerminals.map((terminal) =>
+              renderTab(
+                terminal,
+                `${terminal.name}${terminal.exited ? " (已退出)" : ""}`,
+              ),
+            )}
             <button
-              key="task"
               type="button"
-              className={
-                taskTab.id === activeId
-                  ? "terminal-tab task active"
-                  : "terminal-tab task"
-              }
-              title="任务终端"
-              onClick={() => select(taskTab.id)}
+              className="terminal-tab-add"
+              title="新建终端"
+              onClick={() => create("normal", dock)}
             >
-              任务{taskRunning ? " ●" : ""}
+              +
             </button>
-          )}
-          {debugTab && (
-            <button
-              key="debug"
-              type="button"
-              className={
-                debugTab.id === activeId
-                  ? "terminal-tab debug active"
-                  : "terminal-tab debug"
-              }
-              title="调试终端（程序的标准输入输出）"
-              onClick={() => select(debugTab.id)}
-            >
-              {debugTab.name}
-              {debugTab.exited ? " (已退出)" : ""}
-            </button>
-          )}
-          {normalTerminals.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={
-                t.id === activeId ? "terminal-tab active" : "terminal-tab"
-              }
-              onClick={() => select(t.id)}
-            >
-              {t.name}
-              {t.exited ? " (已退出)" : ""}
-            </button>
-          ))}
+          </div>
+        ) : (
+          <span className="terminal-toolbar-title">
+            {activeTerminal?.name ?? "终端"}
+          </span>
+        )}
+        <span className="terminal-toolbar-spacer" />
+        {!showTabs && (
           <button
             type="button"
-            className="terminal-tab-add"
+            className="terminal-toolbar-button"
             title="新建终端"
-            onClick={() => create()}
+            onClick={() => create("normal", dock)}
           >
             +
           </button>
-        </div>
-        <span className="terminal-toolbar-spacer" />
+        )}
         <button
           type="button"
           className="terminal-toolbar-button"
@@ -645,47 +731,112 @@ function TerminalPane({ onCollapse }: TerminalPaneProps) {
         >
           重启
         </button>
-        <button
-          type="button"
-          className="terminal-toolbar-button"
-          onClick={closeActive}
-          disabled={activeId == null}
-        >
-          ×
-        </button>
-        <button
-          type="button"
-          className="terminal-toolbar-button"
-          onClick={onCollapse}
-        >
-          折叠
-        </button>
-      </div>
-      <div className="terminal-host-area">
-        {taskTab && (
-          <TaskTerminalInstance
-            key={taskTab.id}
-            id={taskTab.id}
-            active={taskTab.id === activeId}
-            instances={instances}
-          />
+        {activeId != null && (
+          <button
+            type="button"
+            className="terminal-toolbar-button"
+            title={`关闭 ${activeTerminal?.name ?? "终端"}`}
+            onClick={() => close(activeId)}
+          >
+            ×
+          </button>
         )}
-        {normalTerminals.map((t) => (
-          <TerminalInstance
-            key={t.id}
-            id={t.id}
-            active={t.id === activeId}
-            instances={instances}
-          />
-        ))}
-        {debugTab && (
-          <DebugTerminalInstance
-            active={debugTab.id === activeId}
-            instances={instances}
-          />
+        {onCollapse && (
+          <button
+            type="button"
+            className="terminal-toolbar-button"
+            onClick={onCollapse}
+          >
+            折叠
+          </button>
         )}
       </div>
+      <div className="terminal-host-area" data-terminal-dock={dock} />
     </section>
+  );
+}
+
+export interface TerminalPanelBounds {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export function TerminalSessionLayer({
+  boundsByDock,
+  visibleByDock,
+  instances,
+  dragging,
+}: {
+  boundsByDock: Record<TerminalDock, TerminalPanelBounds | null>;
+  visibleByDock: Record<TerminalDock, boolean>;
+  instances: TerminalInstanceRegistry;
+  dragging: boolean;
+}) {
+  const terminals = useTerminalStore((s) => s.terminals);
+  const activeIdByDock = useTerminalStore((s) => s.activeIdByDock);
+
+  return (
+    <>
+      {terminals.map((terminal) => {
+        const bounds = boundsByDock[terminal.dock];
+        const active =
+          bounds !== null &&
+          visibleByDock[terminal.dock] &&
+          activeIdByDock[terminal.dock] === terminal.id;
+        const frameStyle: CSSProperties = bounds
+          ? {
+              position: "fixed",
+              left: bounds.left,
+              top: bounds.top,
+              width: bounds.width,
+              height: bounds.height,
+              zIndex: 20,
+              pointerEvents: active && !dragging ? "auto" : "none",
+            }
+          : {
+              position: "fixed",
+              left: 0,
+              top: 0,
+              width: 0,
+              height: 0,
+              zIndex: 20,
+              pointerEvents: "none",
+            };
+
+        if (terminal.kind === "task") {
+          return (
+            <TaskTerminalInstance
+              key={terminal.id}
+              id={terminal.id}
+              active={active}
+              instances={instances}
+              frameStyle={frameStyle}
+            />
+          );
+        }
+        if (terminal.kind === "debug") {
+          return (
+            <DebugTerminalInstance
+              key={terminal.id}
+              active={active}
+              instances={instances}
+              frameStyle={frameStyle}
+            />
+          );
+        }
+        return (
+          <TerminalInstance
+            key={terminal.id}
+            id={terminal.id}
+            active={active}
+            instances={instances}
+            frameStyle={frameStyle}
+          />
+        );
+      })}
+    </>
   );
 }
 

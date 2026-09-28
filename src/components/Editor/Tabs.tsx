@@ -4,6 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { useEditorStore } from "../../stores/editorStore";
+import type { TerminalRecord } from "../../stores/terminalStore";
 import ContextMenu, { type ContextMenuAction } from "../FileTree/ContextMenu";
 
 const DRAG_THRESHOLD = 4;
@@ -23,7 +24,27 @@ interface MenuState {
   path: string;
 }
 
-function Tabs() {
+interface TabsProps {
+  terminals: TerminalRecord[];
+  activeTerminalId: number | null;
+  onSelectTerminal: (id: number) => void;
+  onCloseTerminal: (id: number) => void;
+  onCreateTerminal: () => void;
+  onTerminalDragStart: (id: number) => void;
+  onTerminalDragEnd: () => void;
+  onSelectFile: () => void;
+}
+
+function Tabs({
+  terminals,
+  activeTerminalId,
+  onSelectTerminal,
+  onCloseTerminal,
+  onCreateTerminal,
+  onTerminalDragStart,
+  onTerminalDragEnd,
+  onSelectFile,
+}: TabsProps) {
   const openFiles = useEditorStore((s) => s.openFiles);
   const activePath = useEditorStore((s) => s.activePath);
   const pendingClosePath = useEditorStore((s) => s.pendingClosePath);
@@ -192,6 +213,7 @@ function Tabs() {
                   return;
                 }
                 setActive(tab.path);
+                onSelectFile();
               }}
               onContextMenu={(e) => handleContextMenu(e, tab.path)}
               onPointerDown={(e) => beginDrag(e, tab.path)}
@@ -221,6 +243,62 @@ function Tabs() {
             </div>
           );
         })}
+        {terminals.map((terminal) => (
+          <div
+            key={terminal.id}
+            className={
+              terminal.id === activeTerminalId
+                ? "editor-surface-tab-group active"
+                : "editor-surface-tab-group"
+            }
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData(
+                "application/x-lite-ide-terminal",
+                String(terminal.id),
+              );
+              onTerminalDragStart(terminal.id);
+            }}
+            onDragEnd={onTerminalDragEnd}
+          >
+            <button
+              type="button"
+              className={
+                terminal.id === activeTerminalId
+                  ? "editor-surface-tab active"
+                  : "editor-surface-tab"
+              }
+              onClick={() => onSelectTerminal(terminal.id)}
+            >
+              {terminal.kind === "task"
+                ? "任务"
+                : terminal.kind === "debug"
+                  ? terminal.name
+                  : terminal.name}
+              {terminal.exited ? " (已退出)" : ""}
+            </button>
+            <button
+              type="button"
+              className="tab-close"
+              title={`关闭 ${terminal.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onCloseTerminal(terminal.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="terminal-tab-add"
+          title="在编辑器中新建终端"
+          onClick={onCreateTerminal}
+        >
+          +
+        </button>
       </div>
 
       {menu && (

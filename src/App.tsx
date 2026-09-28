@@ -9,8 +9,8 @@ const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 // ---- Phase 13.1 — apply design-theme at runtime (dark/light/system) ---------
 // Writes the resolved theme onto <html data-theme> so the App.css token layer
-// (Phase 13.1 tokens) and the unified thin scrollbar follow it.  Monaco and
-// xterm keep their own internal themes/scrollbars and are NOT touched here.
+// (Phase 13.1 tokens) and the unified thin scrollbar follow it. Monaco keeps
+// its editor theme; xterm reads the same chrome tokens in the Terminal module.
 function resolveTheme(pref: string): "dark" | "light" {
   if (pref === "system") return systemDark.matches ? "dark" : "light";
   return pref === "light" ? "light" : "dark";

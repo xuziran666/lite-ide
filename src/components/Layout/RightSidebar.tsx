@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useSearchStore } from "../../stores/searchStore";
 import GlobalSearch from "../Search/GlobalSearch";
 import ReferencesPanel from "../References/ReferencesPanel";
@@ -9,9 +10,10 @@ const TABS = [
   { key: "references", label: "引用" },
   { key: "outline", label: "大纲" },
   { key: "problems", label: "问题" },
+  { key: "terminal", label: "终端" },
 ] as const;
 
-function RightSidebar() {
+function RightSidebar({ terminalPane }: { terminalPane: ReactNode }) {
   const open = useSearchStore((s) => s.rightSidebarOpen);
   const tab = useSearchStore((s) => s.rightSidebarTab);
   const select = useSearchStore((s) => s.openRightSidebar);
@@ -32,11 +34,12 @@ function RightSidebar() {
           </button>
         ))}
       </div>
-      <div className="right-sidebar-panels">
+      <div className="right-sidebar-panels" data-terminal-surface="right">
         {tab === "search" && <GlobalSearch />}
         {tab === "references" && <ReferencesPanel />}
         {tab === "outline" && <OutlinePanel />}
         {tab === "problems" && <ProblemsPanel />}
+        {tab === "terminal" && terminalPane}
       </div>
     </div>
   );

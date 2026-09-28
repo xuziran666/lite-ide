@@ -2,7 +2,12 @@ import { create } from "zustand";
 import { listWorkspaceFiles } from "../commands";
 import { useWorkspaceStore } from "./workspaceStore";
 
-export type RightSidebarTab = "search" | "references" | "outline" | "problems";
+export type RightSidebarTab =
+  | "search"
+  | "references"
+  | "outline"
+  | "problems"
+  | "terminal";
 
 /** Active view of the left primary sidebar; null means fully collapsed. */
 export type PrimarySidebarView =

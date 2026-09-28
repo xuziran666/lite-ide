@@ -16,6 +16,7 @@
     "test:commit-diff-sides": "node src/utils/commitDiffSides.test.ts",
     "test:debug-state": "node src/debug/stateMachine.test.ts",
     "test:debug-terminal": "node src/debug/debugTerminalOutput.test.ts",
+    "test:terminal-store": "node src/stores/terminalStore.test.ts",
     "test:debug-launch": "node src/debug/launchConfig.test.ts",
     "test:debug-source-path": "node src/debug/sourcePath.test.ts"
   },

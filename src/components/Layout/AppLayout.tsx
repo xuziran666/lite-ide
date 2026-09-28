@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import FileTree from "../FileTree/FileTree";
@@ -9,7 +9,11 @@ import DebugFloatToolbar from "../Debug/DebugFloatToolbar";
 import Tabs from "../Editor/Tabs";
 import Editor from "../Editor/Editor";
 import DiffView from "../DiffView/DiffView";
-import TerminalPane from "../Terminal/Terminal";
+import TerminalPane, {
+  TerminalSessionLayer,
+  type TerminalInstanceRegistry,
+  type TerminalPanelBounds,
+} from "../Terminal/Terminal";
 import TopBar from "./TopBar";
 import ActivityBar from "./ActivityBar";
 import StatusBar from "./StatusBar";
@@ -23,7 +27,11 @@ import QuickOpen from "../Search/QuickOpen";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
-import { useTerminalStore, DEBUG_TERMINAL_ID } from "../../stores/terminalStore";
+import {
+  useTerminalStore,
+  DEBUG_TERMINAL_ID,
+  type TerminalDock,
+} from "../../stores/terminalStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { useSearchStore } from "../../stores/searchStore";
 import { useConfigStore } from "../../stores/configStore";
@@ -62,6 +70,16 @@ const MAX_RIGHT_SIDEBAR_WIDTH = 500;
 const DEFAULT_TREE_WIDTH = 220;
 const DEFAULT_TERMINAL_HEIGHT = 200;
 const DEFAULT_RIGHT_SIDEBAR_WIDTH = 300;
+const TERMINAL_DRAG_MIME = "application/x-lite-ide-terminal";
+
+function isTerminalDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes(TERMINAL_DRAG_MIME);
+}
+
+function terminalIdFromTransfer(dataTransfer: DataTransfer): number | null {
+  const id = Number(dataTransfer.getData(TERMINAL_DRAG_MIME));
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -151,6 +169,17 @@ function AppLayout() {
     clamp(DEFAULT_TERMINAL_HEIGHT, MIN_TERMINAL_HEIGHT, terminalMaxHeight()),
   );
   const [terminalCollapsed, setTerminalCollapsed] = useState(true);
+  const [activeEditorSurface, setActiveEditorSurface] = useState<"file" | "terminal">(
+    "file",
+  );
+  const [terminalBoundsByDock, setTerminalBoundsByDock] = useState<
+    Record<TerminalDock, TerminalPanelBounds | null>
+  >({ bottom: null, editor: null, right: null });
+  const [draggedTerminalId, setDraggedTerminalId] = useState<number | null>(null);
+  const [terminalDropTarget, setTerminalDropTarget] = useState<
+    "bottom" | "editor" | "right" | null
+  >(null);
+  const terminalInstances = useRef<TerminalInstanceRegistry["current"]>(new Map());
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() =>
     clamp(
       DEFAULT_RIGHT_SIDEBAR_WIDTH,
@@ -163,12 +192,99 @@ function AppLayout() {
 
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const activePath = useEditorStore((s) => s.activePath);
+  const terminals = useTerminalStore((s) => s.terminals);
+  const activeIdByDock = useTerminalStore((s) => s.activeIdByDock);
   const diffOpen = useDiffStore((s) => s.diff !== null);
   const taskRunSeq = useTaskStore((s) => s.taskRunSeq);
   const taskCenterOpen = useTaskStore((s) => s.taskCenterOpen);
   const settingsOpen = useConfigStore((s) => s.settingsOpen);
   const rightSidebarOpen = useSearchStore((s) => s.rightSidebarOpen);
+  const rightSidebarTab = useSearchStore((s) => s.rightSidebarTab);
   const activePrimarySidebar = useSearchStore((s) => s.activePrimarySidebar);
+
+  const editorTerminals = terminals.filter((terminal) => terminal.dock === "editor");
+  const bottomTerminalVisible = !terminalCollapsed && !settingsOpen;
+  const editorTerminalVisible =
+    !settingsOpen && activeEditorSurface === "terminal" && editorTerminals.length > 0;
+  const rightTerminalVisible = rightSidebarOpen && rightSidebarTab === "terminal";
+  const terminalVisible = bottomTerminalVisible && !settingsOpen;
+  const visibleByDock: Record<TerminalDock, boolean> = {
+    bottom: bottomTerminalVisible,
+    editor: editorTerminalVisible,
+    right: rightTerminalVisible,
+  };
+
+  useEffect(() => {
+    if (activePath) setActiveEditorSurface("file");
+  }, [activePath]);
+
+  useEffect(() => {
+    if (editorTerminals.length === 0) setActiveEditorSurface("file");
+  }, [editorTerminals.length]);
+
+  useLayoutEffect(() => {
+    const targets: Record<TerminalDock, HTMLElement | null> = {
+      bottom: document.querySelector('[data-terminal-dock="bottom"]'),
+      editor: document.querySelector('[data-terminal-dock="editor"]'),
+      right: document.querySelector('[data-terminal-dock="right"]'),
+    };
+    const updateBounds = () => {
+      setTerminalBoundsByDock((previous) => {
+        const next = { ...previous };
+        for (const dock of ["bottom", "editor", "right"] as const) {
+          const target = targets[dock];
+          if (!target || !visibleByDock[dock]) {
+            next[dock] = null;
+            continue;
+          }
+          const rect = target.getBoundingClientRect();
+          next[dock] = {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          };
+        }
+        if (
+          (Object.keys(next) as TerminalDock[]).every((dock) => {
+            const before = previous[dock];
+            const after = next[dock];
+            return (
+              before === after ||
+              (before !== null &&
+                after !== null &&
+                before.left === after.left &&
+                before.top === after.top &&
+                before.width === after.width &&
+                before.height === after.height) ||
+              (before === null && after === null)
+            );
+          })
+        ) {
+          return previous;
+        }
+        return next;
+      });
+    };
+    updateBounds();
+    const observer = new ResizeObserver(updateBounds);
+    for (const target of Object.values(targets)) {
+      if (target) observer.observe(target);
+    }
+    window.addEventListener("resize", updateBounds);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateBounds);
+    };
+  }, [
+    bottomTerminalVisible,
+    editorTerminalVisible,
+    rightTerminalVisible,
+    rightSidebarOpen,
+    rightSidebarTab,
+    activeEditorSurface,
+    terminals,
+  ]);
 
   // File system events drive both the tree refresh and the editor handling of
   // files that changed outside the app.
@@ -262,9 +378,18 @@ function AppLayout() {
   // A task run always reveals the terminal panel and focuses the task terminal.
   useEffect(() => {
     if (taskRunSeq === 0) return;
-    setTerminalCollapsed(false);
     const { taskTerminalId } = useTaskStore.getState();
-    if (taskTerminalId != null) useTerminalStore.getState().select(taskTerminalId);
+    if (taskTerminalId == null) return;
+    const terminal = useTerminalStore
+      .getState()
+      .terminals.find((item) => item.id === taskTerminalId);
+    if (!terminal) return;
+    useTerminalStore.getState().select(taskTerminalId);
+    if (terminal.dock === "bottom") setTerminalCollapsed(false);
+    if (terminal.dock === "editor") setActiveEditorSurface("terminal");
+    if (terminal.dock === "right") {
+      useSearchStore.getState().openRightSidebar("terminal");
+    }
   }, [taskRunSeq]);
 
   // Starting a debug session reveals the terminal panel and focuses the Debug
@@ -272,8 +397,16 @@ function AppLayout() {
   const debugTerminalRevealSeq = useTerminalStore((s) => s.revealSeq);
   useEffect(() => {
     if (debugTerminalRevealSeq === 0) return;
-    setTerminalCollapsed(false);
+    const terminal = useTerminalStore
+      .getState()
+      .terminals.find((item) => item.id === DEBUG_TERMINAL_ID);
+    if (!terminal) return;
     useTerminalStore.getState().select(DEBUG_TERMINAL_ID);
+    if (terminal.dock === "bottom") setTerminalCollapsed(false);
+    if (terminal.dock === "editor") setActiveEditorSurface("terminal");
+    if (terminal.dock === "right") {
+      useSearchStore.getState().openRightSidebar("terminal");
+    }
   }, [debugTerminalRevealSeq]);
 
   // Keep the tree in sync with the file that owns the active tab.
@@ -470,7 +603,9 @@ function AppLayout() {
   }, []);
 
   const handleTerminalDrag = useCallback((delta: number) => {
-    setTerminalHeight((h) => clamp(h - delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()));
+    setTerminalHeight((h) =>
+      clamp(h - delta, MIN_TERMINAL_HEIGHT, terminalMaxHeight()),
+    );
   }, []);
 
   // The splitter sits between the center area and the right sidebar; dragging
@@ -489,8 +624,61 @@ function AppLayout() {
   }, []);
   const collapseTerminal = useCallback(() => setTerminalCollapsed(true), []);
   const expandTerminal = useCallback(() => setTerminalCollapsed(false), []);
+  const selectTerminal = useCallback((id: number) => {
+    const terminal = useTerminalStore
+      .getState()
+      .terminals.find((item) => item.id === id);
+    if (!terminal) return;
+    useTerminalStore.getState().select(id);
+    if (terminal.dock === "bottom") setTerminalCollapsed(false);
+    if (terminal.dock === "editor") setActiveEditorSurface("terminal");
+    if (terminal.dock === "right") {
+      useSearchStore.getState().openRightSidebar("terminal");
+    }
+  }, []);
+  const createTerminal = useCallback((dock: TerminalDock) => {
+    useTerminalStore.getState().create("normal", dock);
+    if (dock === "bottom") setTerminalCollapsed(false);
+    if (dock === "editor") setActiveEditorSurface("terminal");
+    if (dock === "right") {
+      useSearchStore.getState().openRightSidebar("terminal");
+    }
+  }, []);
+  const handleTerminalDragStart = useCallback((id: number) => {
+    setDraggedTerminalId(id);
+  }, []);
+  const handleTerminalDragEnd = useCallback(() => {
+    setDraggedTerminalId(null);
+    setTerminalDropTarget(null);
+  }, []);
+  const handleTerminalDrop = useCallback(
+    (id: number, dock: TerminalDock) => {
+      const source = useTerminalStore
+        .getState()
+        .terminals.find((terminal) => terminal.id === id)?.dock;
+      if (!source) return;
+      useTerminalStore.getState().move(id, dock);
+      if (dock === "bottom") setTerminalCollapsed(false);
+      if (dock === "editor") setActiveEditorSurface("terminal");
+      if (dock === "right") {
+        useSearchStore.getState().openRightSidebar("terminal");
+      }
+      if (
+        source === "bottom" &&
+        dock !== "bottom" &&
+        !useTerminalStore
+          .getState()
+          .terminals.some((terminal) => terminal.dock === "bottom")
+      ) {
+        setTerminalCollapsed(true);
+      }
+      setDraggedTerminalId(null);
+      setTerminalDropTarget(null);
+    },
+    [],
+  );
   const toggleTerminal = useCallback(
-    () => setTerminalCollapsed((value) => !value),
+    () => setTerminalCollapsed((collapsed) => !collapsed),
     [],
   );
   const togglePrimarySidebar = useCallback(
@@ -516,15 +704,15 @@ function AppLayout() {
 
   return (
     <div className="app-layout">
-<TopBar
+      <TopBar
           primarySidebarVisible={activePrimarySidebar !== null}
           onTogglePrimarySidebar={togglePrimarySidebar}
-          terminalVisible={!terminalCollapsed}
+          terminalVisible={terminalVisible}
           onToggleTerminal={toggleTerminal}
           secondarySidebarVisible={rightSidebarOpen}
           onToggleSecondarySidebar={toggleRightSidebar}
         />
-<div className="app-body">
+      <div className="app-body">
           <ActivityBar />
           <div
             className={settingsOpen ? "app-center settings-mode" : "app-center"}
@@ -575,10 +763,33 @@ function AppLayout() {
               )}
               <div
                 className={
-                  activePrimarySidebar === null
-                    ? "main-area file-tree-collapsed"
-                    : "main-area"
+                  [
+                    "main-area",
+                    activePrimarySidebar === null ? "file-tree-collapsed" : "",
+                    draggedTerminalId !== null && terminalDropTarget === "editor"
+                      ? "terminal-drop-hover"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
                 }
+                onDragOver={(event) => {
+                  if (!isTerminalDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setTerminalDropTarget("editor");
+                }}
+                onDragLeave={() =>
+                  setTerminalDropTarget((target) =>
+                    target === "editor" ? null : target,
+                  )
+                }
+                onDrop={(event) => {
+                  if (!isTerminalDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  const id = terminalIdFromTransfer(event.dataTransfer);
+                  if (id !== null) handleTerminalDrop(id, "editor");
+                }}
               >
                 {activePrimarySidebar === null && (
                   <button
@@ -590,48 +801,172 @@ function AppLayout() {
                     »
                   </button>
                 )}
-                <Tabs />
-                <div className="editor-stack">
+                <Tabs
+                  terminals={editorTerminals}
+                  activeTerminalId={activeIdByDock.editor}
+                  onSelectTerminal={selectTerminal}
+                  onCloseTerminal={(id) => useTerminalStore.getState().close(id)}
+                  onCreateTerminal={() => createTerminal("editor")}
+                  onTerminalDragStart={handleTerminalDragStart}
+                  onTerminalDragEnd={handleTerminalDragEnd}
+                  onSelectFile={() => setActiveEditorSurface("file")}
+                />
+                <div
+                  className="editor-stack"
+                >
                   <Editor />
                   {diffOpen && <DiffView />}
                   {/* Absolute overlay: does not take part in the editor's layout. */}
                   <DebugFloatToolbar />
+                  {activeEditorSurface === "terminal" && editorTerminals.length > 0 && (
+                    <div className="editor-terminal-surface">
+                      <TerminalPane
+                        dock="editor"
+                        instances={terminalInstances}
+                        showTabs={false}
+                        onDragStart={handleTerminalDragStart}
+                        onDragEnd={handleTerminalDragEnd}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
             {/* Settings overlays the editor while the workbench stays mounted
                 so Monaco models, tabs and the file tree keep their state. */}
             {settingsOpen && <SettingsView />}
-          {!terminalCollapsed && (
-            <Splitter orientation="horizontal" onDrag={handleTerminalDrag} />
-          )}
-          <div
-            className={terminalCollapsed ? "terminal-wrap collapsed" : "terminal-wrap"}
-            style={{ height: terminalCollapsed ? 0 : terminalHeight }}
-          >
-            <TerminalPane onCollapse={collapseTerminal} />
+            {!terminalCollapsed ? (
+              <>
+                <Splitter orientation="horizontal" onDrag={handleTerminalDrag} />
+                <div
+                  className="terminal-wrap"
+                  style={{ height: terminalHeight }}
+                >
+                  <TerminalPane
+                    dock="bottom"
+                    instances={terminalInstances}
+                    onCollapse={collapseTerminal}
+                    onDragStart={handleTerminalDragStart}
+                    onDragEnd={handleTerminalDragEnd}
+                  />
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="terminal-reopen-bar"
+                onClick={expandTerminal}
+              >
+                ▲ 展开终端
+              </button>
+            )}
+            {draggedTerminalId !== null && (
+              <div
+                className={
+                  terminalDropTarget === "bottom"
+                    ? "terminal-drop-target terminal-drop-bottom active"
+                    : "terminal-drop-target terminal-drop-bottom"
+                }
+                onDragOver={(event) => {
+                  if (!isTerminalDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  setTerminalDropTarget("bottom");
+                }}
+                onDragLeave={() =>
+                  setTerminalDropTarget((target) =>
+                    target === "bottom" ? null : target,
+                  )
+                }
+                onDrop={(event) => {
+                  if (!isTerminalDrag(event.dataTransfer)) return;
+                  event.preventDefault();
+                  const id = terminalIdFromTransfer(event.dataTransfer);
+                  if (id !== null) handleTerminalDrop(id, "bottom");
+                }}
+              >
+                底部
+              </div>
+            )}
           </div>
-          {terminalCollapsed && (
-            <button
-              type="button"
-              className="terminal-reopen-bar"
-              onClick={expandTerminal}
-            >
-              ▲ 展开终端
-            </button>
-          )}
-        </div>
         {rightSidebarOpen && (
           <>
             <Splitter orientation="vertical" onDrag={handleRightSidebarDrag} />
-            <div className="right-sidebar-wrap" style={{ width: rightSidebarWidth }}>
+            <div
+              className={
+                draggedTerminalId !== null && terminalDropTarget === "right"
+                  ? "right-sidebar-wrap terminal-drop-hover"
+                  : "right-sidebar-wrap"
+              }
+              style={{ width: rightSidebarWidth }}
+              onDragOver={(event) => {
+                if (!isTerminalDrag(event.dataTransfer)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setTerminalDropTarget("right");
+              }}
+              onDragLeave={() =>
+                setTerminalDropTarget((target) =>
+                  target === "right" ? null : target,
+                )
+              }
+              onDrop={(event) => {
+                if (!isTerminalDrag(event.dataTransfer)) return;
+                event.preventDefault();
+                const id = terminalIdFromTransfer(event.dataTransfer);
+                if (id !== null) handleTerminalDrop(id, "right");
+              }}
+            >
               <div className="right-sidebar">
-                <RightSidebar />
+                <RightSidebar
+                  terminalPane={
+                    <TerminalPane
+                      dock="right"
+                      instances={terminalInstances}
+                      onDragStart={handleTerminalDragStart}
+                      onDragEnd={handleTerminalDragEnd}
+                    />
+                  }
+                />
               </div>
             </div>
           </>
         )}
+        {draggedTerminalId !== null && !rightSidebarOpen && (
+          <div
+            className={
+              terminalDropTarget === "right"
+                ? "terminal-drop-target terminal-drop-right active"
+                : "terminal-drop-target terminal-drop-right"
+            }
+            onDragOver={(event) => {
+              if (!isTerminalDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              setTerminalDropTarget("right");
+            }}
+            onDragLeave={() =>
+              setTerminalDropTarget((target) =>
+                target === "right" ? null : target,
+              )
+            }
+            onDrop={(event) => {
+              if (!isTerminalDrag(event.dataTransfer)) return;
+              event.preventDefault();
+              const id = terminalIdFromTransfer(event.dataTransfer);
+              if (id !== null) handleTerminalDrop(id, "right");
+            }}
+          >
+            右侧
+          </div>
+        )}
       </div>
+      <TerminalSessionLayer
+        boundsByDock={terminalBoundsByDock}
+        visibleByDock={visibleByDock}
+        instances={terminalInstances}
+        dragging={draggedTerminalId !== null}
+      />
       <StatusBar />
 
       {taskCenterOpen && <TaskCenter />}
