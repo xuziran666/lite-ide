@@ -1,6 +1,6 @@
 # lite-ide 架构说明
 
-> 版本 0.3.0
+> 版本 0.3.1
 
 ## 1. 技术栈与版本
 
@@ -181,7 +181,7 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | `debug-terminal-output` | `{ id, data: Vec<u8> }`（空数据块 = 进程退出） | `debug/session.rs`（被调试进程的 PTY） | `Terminal.tsx`：仅当 `id === DEBUG_TERMINAL_ID` 时写入该 xterm |
 | `debug-terminal-exit` | `{ id }` | `debug/session.rs`（`runInTerminal` 的 PTY 读线程遇到空数据块） | `Terminal.tsx` → 终端标签显示「(已退出)」 |
 
-终端输出**不走全局事件**：`terminal_spawn` 时前端传入独立的 `Channel<Vec<u8>>`，每个 PTY 会话独占一条通道（空数据块 = 进程退出标记）。**Debug 终端是例外**：它的 PTY 由后端在适配器发出 `runInTerminal` 时创建（不是前端启动的会话），因此没有 Channel 可用，输出改走上面的 `debug-terminal-*` 事件。
+普通终端输出**不走全局事件**：`terminal_spawn` 时前端传入独立的 `Channel<Vec<u8>>`，每个 PTY 会话独占一条通道（空数据块 = 进程退出标记）。**Debug 终端由后端管理 PTY**：带 `program` 的 launch 由后端直接启动进程并 attach 适配器；适配器也可通过 `runInTerminal` 请求启动程序。两种路径均通过 `debug-terminal-*` 事件传输输出。
 
 ## 6. 前端状态管理
 
@@ -190,9 +190,9 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 | `workspaceStore` | 工作区路径、`init`（恢复上次工作区）、`openWorkspace`（设置并重置其余 store） |
 | `fileTreeStore` | 树的加载与刷新（`loadRoot`/`toggleDir`/`loadChildren`/`refreshPath`/`revealPath`）、CRUD 包装、`selectedPath`、`version` 竞态令牌 |
 | `editorStore` | 打开标签、`activePath`、脏状态、`save`，关闭流程、外部变更、光标信息、`openGlobalFile`（外部标签打开 `tasks.json`）、`openExternalFile`（只读外部文件，见 §7） |
-| `configStore` | 用户配置加载/热更新、`settingsOpen`、键位录制落盘（`saveKeybinding` 冲突检测）、shell 列表、`lsp` 配置（`cloneLsp` 深拷贝回写）、`debug` 配置（`cloneDebug` 深拷贝回写 + `debugAdapterFor`/`debugLaunchFor` 读取，**无回退默认**）、`ensureUserConfigFile` |
+| `configStore` | 用户配置加载/热更新、`settingsOpen`、键位录制落盘（`saveKeybinding` 冲突检测）、shell 列表、`lsp` 配置、`debug` adapter 与 legacy per-language 配置、全局 `launch.json` 的解析/加载/错误状态、`ensureUserConfigFile` |
 | `searchStore` | Quick Open 文件索引与开关、左侧主栏当前视图（`activePrimarySidebar`：explorer/sourceControl/tasks/debug/null）、右侧栏开关与当前标签（search/references/outline/problems）、查找引用结果（`references`/`referencesSymbol`/`referencesLoading`） |
-| `terminalStore` | 终端记录（id/name/exited/kind：normal/task/debug）、多标签 create/close/select、退出标记、`ensureDebugTerminal`（固定 `DEBUG_TERMINAL_ID = 1000000`）与 `revealSeq`（触发终端面板展开并聚焦 Debug 标签） |
+| `terminalStore` | 终端记录（id/name/exited/kind：normal/task/debug）、多标签 create/close/select、退出标记、`ensureDebugTerminal`、Debug sessionId owner 与按 session 清空输出 buffer / 请求 xterm reset |
 | `debugStore` | 一个 `DebugState`（纯 reducer 产生，每次启动重建）+ `breakpointsByFile` / `breakpointsByWorkspace`（**按工作区保留、内存态**）+ `workspaceKey`；`toggleBreakpoint` / `syncBreakpoints` / `recordBreakpointVerdict` / `syncAllBreakpoints` / `activateWorkspace` / `clearBreakpoints` |
 | `taskStore` | 任务列表、任务中心开关、任务终端 id、运行状态、`runTask`（变量解析→排队→任务终端执行） |
 | `uiStore` | 全局 Toast 提示 |
@@ -357,26 +357,39 @@ React 组件 ──► Zustand store ──► src/commands/index.ts ──► i
 ## 16. 内置 DAP 调试客户端（Phase 16）
 
 ```text
-lite-ide ──DAP（Content-Length 帧，stdio）──▶ 调试适配器（lldb-dap 等）──▶ GDB / LLDB / 任意调试器
+lite-ide
+├── DAP 控制通路（Content-Length 帧，经 stdio 与适配器通信）
+│   └── Debug Adapter（lldb-dap / cdt-gdb-adapter / debugpy / ...）
+│       └── GDB / LLDB / Python 调试器 / ...
+│           └── 控制 debuggee（launch 或 attach）
+│
+└── Debug Terminal（程序 I/O 通路）
+    └── PTY
+        └── debuggee
+            ├── stdin
+            ├── stdout
+            └── stderr
 ```
+
+两条通路职责分离：DAP 与适配器交换调试控制、断点、线程和栈帧等协议消息；被调试程序的 `stdin` / `stdout` / `stderr` 接入 Debug Terminal 的 PTY，不经过 DAP 输出流。带 `program` 的 launch 由后端先在 PTY 启动 debuggee，再让适配器 attach；适配器请求 `runInTerminal` 时则由后端按请求创建 PTY。
 
 三条设计原则：**只说 DAP**（没有 GDB/MI 客户端，也没有任何调试器特定分支，`debugger` 是用户安装的外部进程）、**语言无关**（语言 id 只作为数据出现在 `debug.adapters.<languageId>` 与启动参数里，新增语言是改配置）、**不问不启动**（打开工作区不会 spawn 任何适配器，也不轮询）。消息层与 LSP 共用同一个帧编解码器（`framing.rs`），但 DAP **不是 JSON-RPC**（三种报文形状、`arguments`/`body` 的命名、`request_seq` 关联都不同），因此 `debug/transport.rs` 与 `lsp/rpc.rs` 是两套独立实现。
 
 ### 16.1 后端（`src-tauri/src/debug/`）
 
-- `mod.rs`：`resolve_adapter_argv`（空配置 → `Debug adapter not configured: <language>`；**裸可执行名按 PATH 解析为绝对路径**，带路径的参数原样保留——`lldb-dap` 用自身 `argv[0]` 构造 `runInTerminal` 的启动命令，裸名字会变成相对 IDE cwd 的无效路径）、`initialize_arguments`（`clientID`/`clientName = lite-ide`、`adapterID` = 语言 id、`linesStartAt1`/`columnsStartAt1 = true`、`pathFormat = "path"`、`supportsVariableType`、`supportsRunInTerminalRequest = true`，其余能力显式 `false`）、`launch_arguments`（对象原样透传，非对象 → `{}`）、`verify_program`（`launch` 前检查 `program` 是否存在，缺失报 `program not found: …`）、`parse_run_in_terminal`（按规范启动程序是 `args[0]`，与 lldb-dap 一致）。
+- `mod.rs`：`resolve_adapter_argv`（空配置 → `Debug adapter not configured: <language>`；**裸可执行名按 PATH 解析为绝对路径**，带路径参数原样保留）、`initialize_arguments`（DAP 客户端信息与能力声明）、`launch_arguments` / `verify_program`，以及 `debuggee_spec`（从 launch 参数提取程序、参数、cwd、env）；后端可据此先在 Debug PTY 启动程序，再用 adapter 对应的 PID 字段发送 attach。`runInTerminal` 仍作为适配器请求启动程序的另一条路径。
 - `transport.rs`：`Incoming` 四态（Response / Request / Event / Invalid）+ `classify`（不认识的消息降级为 `Invalid`，绝不 panic——release 使用 `panic = "abort"`）、`build_request`/`build_response`/`SeqCounter`、`failure_text`（把适配器失败响应的 `message`/`body` 拼成可读文本）、`reply_for_adapter_request`（适配器发来的其它请求显式回失败，让它自行回退）。
 - `session.rs`：`DebugSession`（`AppHandle` 可选——生产环境转发事件，集成测试传 `None` 直接驱动协议）：
   - **启动**：spawn 适配器（Windows 加 `CREATE_NO_WINDOW`，不弹控制台）、stdin/stdout 管道、stderr 交给独立线程排空（避免管道写满把适配器卡死）、reader 线程 `StreamReader` 增量解码（缓冲上限 16MB）；随后 `initialize` 并记下 `capabilities`。
-  - **请求关联**：`SeqCounter` 分配 `seq`，`PendingRequests`（`mpsc`）把响应的 `request_seq` 关联回调用者；`request` 默认 10s 超时、`launch`/`attach` 用 60s。`send_request` **不登记**待响应项（`launch` 专用，见 16.3）。
+  - **请求关联**：`SeqCounter` 分配 `seq`，`PendingRequests`（`mpsc`）把响应的 `request_seq` 关联回调用者；`request` 默认 10s 超时、`launch`/`attach` 用 60s。`send_request` **不登记**待响应项，用于响应可能延迟到首次停止之后的启动请求。
   - **事件**：`initialized` 既唤醒 `await_initialized`（500ms 宽限、25ms 轮询一次、适配器静默也继续配置）也转发给前端；`terminated` 触发 `finish_session`。
-  - **反向请求**：`runInTerminal` 是唯一实现的适配器→客户端请求（其余交 `reply_for_adapter_request`）。它解析 `args[0]`/`cwd`/`env`，用 `terminal::spawn_program` 在保留 id `DEBUG_TERMINAL_ID` 上创建 PTY，输出经 `debug-terminal-output` 事件转发，并回 `{ processId }`。
+  - **Debuggee PTY**：带 `program` 的普通 launch 由 `commands/debug.rs` 直接启动 PTY 子进程并向适配器发送 attach；`runInTerminal` 则是唯一实现的适配器→客户端反向请求，用于适配器要求客户端启动程序的情况。两条路径都通过 `debug-terminal-*` 事件转发程序输出。
   - **结束**：`shutdown()` 发 `disconnect{ restart: false, terminateDebuggee: true }`（2s 宽限）→ 置 `running = false` → 批量失败在途请求 → 300ms 内自然退出则返回，否则 `force_kill`（Windows 连进程树）。`finish_session`（`terminated` 之后）**先清 `running` 再直接 reap**（不用 `shutdown`，否则会在 reader 线程上等自己的响应），并且只在槽位仍持有自己时才 `clear_debug_if_same`——因此适配器进程可以晚于「会话结束」退出，不会挡住下一次 F5，也不会误删接替它的新会话。
 - `commands/debug.rs`：三个命令**全部 `spawn_blocking`**（每次调用都要等适配器往返，不能占主线程）：
 
 | 命令 | 行为 |
 |---|---|
-| `debug_start` | 要求已打开工作区；已有会话且「运行中且未结束」→ 报错，否则清槽 + `shutdown` 旧会话；校验 `request` ∈ {launch, attach}；解析适配器 argv；`launch` 前 `verify_program`；`DebugSession::start` → `setExceptionBreakpoints([])` → `send_request(launch/attach)`（**不等响应**）→ 返回 `{ adapter, capabilities }` |
+| `debug_start` | 要求已打开工作区；已有会话且「运行中且未结束」→ 报错，否则清槽 + `shutdown` 旧会话；校验 `request` ∈ {launch, attach}；解析适配器 argv；`launch` 前 `verify_program`；带 `program` 的 launch 在 Debug PTY 启动进程并发送 attach，其余配置直接发送 launch/attach；启动请求不等响应，返回 `{ adapter, capabilities }` |
 | `debug_request` | 取「运行中且未结束」的会话发请求并返回其 `body`；若请求后会话已死则按身份校验清槽，前端不会继续对死会话发请求 |
 | `debug_stop` | `stop_debug()` + `kill_debug_terminal()`（关闭被调试进程的 PTY） |
 
@@ -385,8 +398,8 @@ lite-ide ──DAP（Content-Length 帧，stdio）──▶ 调试适配器（ll
 - `types.ts`：语言无关领域类型（`DebugStatus` 六态、`FileBreakpoints`、`StackFrame`、`ScopeEntry`、`VariableEntry`、`DebugState`）；`protocol.ts` 是 DAP wire 类型与 `asRecord`/`asNumber`/`asString`/`sourcePath` 窄化辅助——**行号 1-based，与 Monaco 一致**，所以整条调试链路没有任何 ±1 转换（与 LSP 侧正好相反）。
 - `stateMachine.ts`：纯 reducer `debugReducer(state, event)`；事件覆盖启动成功/失败、停止、继续、进程、线程、栈、变量、输出、错误、重置；输出保留 200 行、栈保留 100 帧。**状态只由 DAP 事件决定**，按钮点击从不直接写 `running`/`stopped`；`stopped`/`continued`/`terminated`/`exited` 都会丢弃上一次停止点的栈与变量，避免把旧数据当当前值展示。另导出 `mergeBreakpointVerdicts`（适配器没有提到的行保留为「未验证」而不是删除——用户的断点列表才是权威）、`breakpointRequest` 与按钮谓词（`isStartAction`/`isContinueAction`/`isStopped`/`hasSession`）。
 - **断点路径不变量**：`setBreakpoints` 的 `Source.path` 必须使用**真实大小写的绝对路径**（Windows 下为原生反斜杠），由 `src/debug/sourcePath.ts` 的 `dapSourcePath()` 生成；适配器（如 GDB）拿它与自身调试信息做**大小写敏感**比较，因此 `fileKey()`（Windows 上会小写化的身份键）绝不用于出网路径——它只用于 Map 键、断点状态比较与装饰层匹配。
-- `launchConfig.ts`：`buildLaunchArguments`（默认值 ⊕ 用户配置 ⊕ 变量展开，**用户永远优先**；`request` 字段不会作为 DAP 参数发出）、`expandLaunchConfig`（深度遍历对象/数组，复用任务变量与 `normalizeTaskPath`，未知变量保持原样）、`requestKindOf`（`"attach"` 之外一律回退 `launch`）、`defaultProgram`（C/C++ 的 `build/app`，Windows 追加 `.exe`）。
-- `session.ts`：**唯一与适配器对话的地方**（编排层）。启动时序 `initialize → setExceptionBreakpoints → launch/attach`（后端完成）→ 等 `initialized` → `syncAllBreakpoints` → `configurationDone` → 全部由事件驱动；`stopped` 后依次拉 `threads` → `stackTrace` → frame 0 的 `scopes` → 各 scope 的 `variables`；`continue`/`pause`/`next`/`stepIn`/`stepOut` 都在发请求前**立即**清当前行标记（一次运行期间不能显示旧行）；幂等订阅 `debug-event` / `debug-exited` / `debug-terminal-opened`。
+- `launchConfig.ts`：支持全局 `launch.json`（多配置解析、校验、adapter type 选择、额外字段透传），并保留 `user.json` 的 per-language fallback；统一执行默认值合并、变量展开与 `launch`/`attach` 请求判断。`request` 不作为 DAP 参数发出，C/C++ 默认程序为 `build/app`（Windows 追加 `.exe`）。
+- `session.ts`：**唯一与适配器对话的地方**（编排层）。启动时序 `initialize → setExceptionBreakpoints → launch/attach`（后端完成）→ 等 `initialized` → `syncAllBreakpoints` → `configurationDone` → 全部由事件驱动；`stopped` 后依次拉 `threads` → `stackTrace` → frame 0 的 `scopes` → 各 scope 的 `variables`；`continue`/`pause`/`next`/`stepIn`/`stepOut` 都在发请求前**立即**清当前行标记（一次运行期间不能显示旧行）；新 session 通过 sessionId/owner 隔离旧事件并触发 Debug Terminal 清屏。
 - `editorDecorations.ts`：编辑器装饰层。装订线常开（`glyphMargin: true`，会话开始后点击位置不会移动），点击 `GUTTER_GLYPH_MARGIN` 切换断点；已绑定 = 实心圆点、未解析 = 空心圆点；当前执行行整行高亮 + overview ruler 标记并跟随**选中的栈帧**；每轮整体重算（`deltaDecorations` 替换旧 id），不会泄漏装饰对象。
 - UI 组装：`DebugPanel`（左侧主栏：启动/附加按钮、状态行、断点、调用堆栈（线程 > 1 才有下拉）、变量（可展开）、输出尾部）、`DebugFloatToolbar`（编辑器区绝对定位浮层：暂停/继续/单步/重启/停止，按 capabilities 门控——仅显式 `false` 才禁用）、`ActivityBar` 的「运行和调试」入口与会话徽标、`Editor.tsx` 订阅 `currentLocation` 做导航、`Terminal.tsx` 的 `DebugTerminalInstance`。
 - 状态分层：`stores/debugStore.ts` 把「一次会话的 `DebugState`」与「按工作区的断点映射」分开——前者每次启动重建，后者在切换工作区时只是换一张表（`activateWorkspace`），因此断点不会因为会话结束或切走工作区而消失（内存态，重启 IDE 清空）。`workspaceStore` 在设置新工作区前后 `debugStop` + `reset`，Rust 侧 `set_workspace` / `RunEvent::Exit` 也会 `stop_debug`。

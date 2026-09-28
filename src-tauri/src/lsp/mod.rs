@@ -56,7 +56,7 @@ pub struct LspStartResult {
 pub fn initialize_params(root_uri: &str, process_id: u32) -> Value {
     json!({
         "processId": process_id,
-        "clientInfo": { "name": "lite-ide", "version": "0.3.0" },
+        "clientInfo": { "name": "lite-ide", "version": "0.3.1" },
         "rootUri": root_uri,
         "workspaceFolders": [{
             "uri": root_uri,
@@ -134,6 +134,7 @@ mod tests {
     fn initialize_params_contains_required_handshake_fields() {
         let params = initialize_params("file:///C:/workspace", 1234);
         assert_eq!(params["processId"], 1234);
+        assert_eq!(params["clientInfo"]["version"], "0.3.1");
         assert_eq!(params["rootUri"], "file:///C:/workspace");
         assert_eq!(params["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"], true);
         // `publishDiagnostics` must be advertised or typescript-language-server

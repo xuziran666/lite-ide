@@ -1,5 +1,7 @@
 # lite-ide
 
+> 当前版本：v0.3.1
+
 基于 Tauri v2 的轻量级跨平台代码编辑器，核心功能为：文件树、代码编辑器（Monaco）、内置终端（xterm.js + portable-pty）、任务与设置系统、项目导航（Quick Open / 全局搜索 / 大纲 / 问题）与内置 LSP 客户端（Rust / C / C++ / TypeScript / JavaScript），基于系统 Git CLI 的源代码管理（Phase 2 暂存/取消暂存/文件 Diff/提交 + Phase 3.1 提交历史/提交文件树/提交 Diff），以及内置 DAP 调试客户端（断点、启动/附加、单步、调用堆栈、变量、Debug Terminal）。
 
 ## 环境要求
@@ -35,6 +37,9 @@ cd src-tauri && cargo test    # Rust 单测 + 真实 lldb-dap E2E（工具缺失
 pnpm build                    # TypeScript 检查 + Vite 构建
 pnpm test:debug-state         # 调试状态机纯函数测试（node 直接运行 .ts）
 pnpm test:debug-launch        # 调试启动配置纯函数测试
+pnpm test:debug-terminal      # Debug Terminal 输出缓冲测试
+pnpm test:terminal-store      # 终端与 Debug Session 生命周期测试
+pnpm test:debug-source-path   # DAP 源路径测试
 ```
 
 其余 `test:*` 脚本（`git-status` / `path-identity` / `diff-sides` / `commit-tree` / `commit-diff-sides`）同理，均为 `node` 可直接运行的纯函数测试。
@@ -66,7 +71,8 @@ pnpm test:debug-launch        # 调试启动配置纯函数测试
 - 工程化 —— GitHub Actions：CI（前端 `tsc + vite build` 与 Rust `cargo check`）与 Release（多平台 `tauri-action`，`v*` 标签触发）。
 - 阶段 15：源代码管理（Git Phase 2）—— 基于系统 Git CLI（`rev-parse --show-toplevel` 仓库检测、`status --short --untracked-files=all` 状态读取、`add --` / `restore --staged --` 暂存与取消暂存、`show HEAD:<path>`/`show :0:<path>` 两侧 blob 读取、`commit -m` 提交）、活动栏「源代码管理」入口与右侧栏「源代码」标签、更改 / 已暂存更改 两组列表与 M/A/D/R/U/? 状态徽标、单文件与全部暂存 / 取消暂存、点击行打开只读 Monaco Diff（HEAD / 索引 / 工作区 / 空 任意两侧，删除文件与二进制检测友好）、底部提交框（`Ctrl/Cmd+Enter` 提交，空白消息/无暂存更改禁用，失败显示 stderr 原文）、文件监听 400ms 防抖自动刷新、工作区切换清理与竞态保护、git 未安装/非仓库错误提示。分支、推送、冲突解决等留待后续阶段。
 - 阶段 15.1：源代码管理（Git Phase 3.1）——「更改 / 历史」视图切换；提交历史列表（`git log -n/--skip` 分页，每页 50，短哈希/说明/作者/相对时间，空仓库与合并提交友好）；提交详情与变更清单（`git show -M --name-status -z`，`%P` 取首父，按 `R100\0旧\0新` 解析重命名）；**IDEA 风格工作区相对目录树**（每层目录在前、文件在后、大小写不敏感字母序，目录默认展开）；点击文件复用既有只读 Diff 浮层做 **Parent → Commit 单文件对比**（`DiffSideRequest` 新增 `commit`/`label`，前端纯函数 `commitDiffSides` 映射 M/A/D/R/C，标签为 `短哈希:path`）；`safe_commit_ref` 校验任意修订引用、blob 缺失降级为空；新增 Tauri 命令 `git_log` / `git_commit_details`；进视图自动加载、刷新按钮联动重载、工作区切换清理与竞态保护。
-- 阶段 16：内置调试（DAP）—— 自建 Debug Adapter Protocol 客户端，前端不含任何调试器特定逻辑：Rust 侧 `DebugSession` 负责适配器进程、`Content-Length` 帧（与 LSP 共用 `framing.rs`）、`request_seq` 请求关联与生命周期（仅 `debug_start` / `debug_request` / `debug_stop` 三个命令，均走阻塞线程池），前端 `src/debug/` 负责协议编排（`initialize` → `launch`/`attach` → 等 `initialized` → `setBreakpoints` → `configurationDone` → `stopped`，`launch` 响应不等——真实 `lldb-dap` 会把它推迟到首次停止）与纯函数状态机；适配器与启动参数全部来自 `user.json` 的 `debug.adapters.<languageId>` / `debug.launch.<languageId>`（**无内置默认**、语言无关，`launch` 内支持 `${workspaceFolder}`/`${file}` 等任务变量与 `request: "attach"`，Windows `\\?\` 前缀自动剥离）；装订线断点（已绑定实心 / 未解析空心，按工作区保留于内存）、`F5` 启动·继续 / `F10` 单步跳过 / `F11` 单步进入 / `Shift+F11` 单步跳出 / `Shift+F5` 停止、活动栏「运行和调试」面板（断点 / 调用堆栈与线程切换 / 变量可展开 / 输出尾部）+ 编辑器浮层会话工具栏（暂停·继续·单步·重启·停止，按 `initialize` capabilities 门控）、点击栈帧或断点经 `openAndReveal` 跳转（工作区外只读）、当前执行行高亮；新增 **Debug 终端**（固定 id 的 PTY 即被调试进程，通过唯一的反向请求 `runInTerminal` 实现交互式 stdin）。另含 3 个 Rust 单测模块（33 个用例）、2 个前端纯函数测试（`test:debug-state` / `test:debug-launch`）与 1 个对真实 `lldb-dap` 的端到端测试。
+- 阶段 16：内置调试（DAP）—— 自建 Debug Adapter Protocol 客户端，Rust 侧 `DebugSession` 负责适配器进程、`Content-Length` 帧（与 LSP 共用 `framing.rs`）、`request_seq` 请求关联与生命周期；前端负责 DAP 编排、纯函数状态机、断点与栈帧/变量 UI。适配器命令仍由 `user.json` 的 `debug.adapters.<type>` 配置；启动配置优先读取同一应用配置目录中的全局 `launch.json`，没有可用配置时兼容 `user.json` 的 `debug.launch.<languageId>`。带 `program` 的 launch 由后端在 Debug PTY 启动进程并 attach，保留程序的交互式 stdin/stdout；Debug Terminal 每个新 session 开始时清空 screen、scrollback 和 pending output，session 结束时保留最终输出。支持装订线断点、F5/F10/F11/Shift+F11/Shift+F5、调用堆栈与线程切换、可展开变量、输出尾部、编辑器内调试工具栏及源码导航。
+- 阶段 16.1：调试启动与终端生命周期 —— 支持全局 `launch.json` 多配置、按 adapter `type` 选择可用配置、VS Code 风格 `request`、变量展开与 adapter 专属字段透传；旧版 per-language `user.json` 配置继续兼容。补齐 Debug Terminal 与当前 session 绑定的清屏/输出缓冲行为，迟到的旧 session 事件不会覆盖当前终端状态。
 
 > 详细功能与架构说明见 [docs/features.md](docs/features.md)、[docs/architecture.md](docs/architecture.md)。
 

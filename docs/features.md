@@ -1,6 +1,6 @@
 # lite-ide 功能汇总
 
-> 版本 0.3.0  · 最后更新 2026-09
+> 版本 0.3.1  · 最后更新 2026-09
 
 基于 Tauri v2 的轻量级跨平台代码编辑器，核心为**文件树**、**代码编辑器（Monaco）**、**内置终端（xterm.js + portable-pty）**、**任务/设置系统**，以及**项目导航**、**内置 LSP 客户端**、**源代码管理（Git）**与**内置 DAP 调试客户端**。
 
@@ -410,9 +410,15 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 
 ## 16. 调试（内置 DAP 客户端）
 
-自建 Debug Adapter Protocol 客户端，**不含任何调试器特定代码**：调试器是一个外部适配器进程（例如 `lldb-dap`），其命令行与启动参数完全由 `user.json` 决定，因此「支持一种新语言」是改配置而不是改代码。
+自建 Debug Adapter Protocol 客户端，调试器是外部适配器进程（例如 `lldb-dap`）。适配器命令由 `user.json` 配置；程序启动配置优先取全局 `launch.json`，并兼容 `user.json` 的 per-language 配置，因此扩展语言通常只需补充配置。
 
-### 16.1 配置（`user.json` 的 `debug` 节）
+### 16.1 调试配置（`launch.json` 与 `user.json`）
+
+启动配置优先使用与 `user.json` 同目录的全局 `launch.json`（VS Code 风格的 `configurations` 数组）；适配器命令仍保存在 `user.json` 的 `debug.adapters.<type>`。没有可用的全局启动配置时，继续兼容 `user.json` 的 `debug.launch.<languageId>`。
+
+全局配置中的 `type` 用于选择适配器，`request` 默认为 `launch`；`program`、`cwd`、`args`、`env`、`console` 等已知字段会被解析，未知的 adapter 专属字段原样传递。存在多个配置时按文件顺序选择首个适配器已配置的项。`${workspaceFolder}`、`${file}` 等变量沿用任务变量展开规则；Windows 扩展长度路径前缀会在发送给适配器前归一化。
+
+旧版 per-language 配置仍可使用：
 
 ```json
 {
@@ -430,11 +436,12 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 }
 ```
 
-- **`adapters.<languageId>`**：适配器命令行。键名大小写不敏感（解析时统一小写，`Rust`/`rust` 都能命中）；`command` 为空白的条目会被丢弃（前端视作「未配置」并提示缺少该键）；裸可执行名会先在 PATH 中解析成**绝对路径**再启动——`lldb-dap` 用自身 `argv[0]` 构造 `runInTerminal` 的启动命令，裸名字会变成相对 IDE cwd 的无效路径。
-- **`launch.<languageId>`**：DAP `launch` / `attach` 参数，**原样透传**（只要求是 JSON 对象，不做语义校验）。其中 `${…}` 按任务系统同一套规则展开：`${workspaceFolder}`、`${file}`、`${fileBasename}`、`${fileBasenameNoExtension}`、`${fileDirname}`、`${relativeFile}`、`${relativeFileDirname}`，另有调试专用的 `${program}` / `${programBasename}`；绝对路径结果会剥离 Windows `\\?\` 扩展长度前缀（与任务变量同源）。未知变量**保持原样**，这样拼写错误会原样出现在适配器的报错里，而不是变成空路径。
-- **合并优先级**：内置默认 → 用户配置 → 变量展开（用户永远优先）。内置默认只有两条：C/C++ 的 `program = build/app`（Windows 追加 `.exe`）与 `console = integratedTerminal`；其它语言**没有**默认 `program`，必须自己写，否则启动前就报 `program not found`（比适配器各自的失败文案更好懂）。
+- **`adapters.<type>`**：适配器命令行。键名大小写不敏感；`command` 为空白的条目会被丢弃；裸可执行名会先在 PATH 中解析成**绝对路径**再启动。
+- **全局 `launch.json`**：位于应用配置目录，与 `user.json` 同目录，采用 VS Code 风格的 `configurations` 数组。选择首个存在已配置 adapter 的配置；解析后的已知字段用于构造 DAP 参数，未知的 adapter 专属字段原样保留。
+- **legacy `launch.<languageId>`**：没有全局启动配置时使用；旧配置只要求为 JSON 对象，按原有规则传递其 adapter 专属字段。
+- **变量与默认值**：`${workspaceFolder}`、`${file}`、`${fileBasename}`、`${fileBasenameNoExtension}`、`${fileDirname}`、`${relativeFile}`、`${relativeFileDirname}` 及 `${program}` / `${programBasename}` 沿用任务变量展开规则；Windows `\\?\` 前缀会被剥离，未知变量保持原样。内置默认仅含 C/C++ 的 `program = build/app`（Windows 追加 `.exe`）与 `console = integratedTerminal`；其它语言没有默认 `program`。
 - **缺省值**：`request` 缺省 `launch`（`"attach"` 附加到已运行进程，未知值回退 `launch`）；`cwd` 缺省工作区根；`stopOnEntry` 缺省 `false`。`request` 本身不会作为参数发给适配器。
-- **生效时机**：每次启动调试时读取，改完 `user.json` 保存后重新 F5 即生效（**无需重启应用**）。设置 → 调试 只有一个「打开 user.json」按钮（用 `ensureUserConfigFile` + `editorStore.openGlobalFile`，不引入第二套调试表单 schema）。
+- **生效时机**：适配器配置和启动配置由应用配置加载流程读取；设置 → 调试提供「打开 user.json」入口编辑 adapter/legacy 配置，不另建调试表单。
 
 ### 16.2 能力与交互
 
@@ -443,7 +450,7 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 - **侧栏面板**：顶部的启动 / 附加按钮与状态行（错误文本 > 已暂停原因 > 运行中 > 正在启动 + 适配器名），下面是 **断点**（按文件分组、可跳转、可逐个移除，实心圆点 = 适配器已绑定、空心 = 尚未解析）、**调用堆栈**（线程数 > 1 时出现线程下拉；点击栈帧同时选中该帧并把编辑器移到其位置，无源码的原生帧只选中不跳转）、**变量**（按 scope 分组、可逐层展开子项、缓存按停止点整体失效）、**输出**（适配器 `output` 事件的最后 12 行；状态机保留最近 200 行）。
 - **断点**：在编辑器**装订线（glyph margin）**上单击切换（装订线常开，因此会话开始后点击位置不会移动）；点击断点列表行是**跳转**而不是删除，删除用行尾 ✕。断点按**工作区**保存在内存里：结束会话、切走再切回工作区都不会丢，重启 IDE 才清空；适配器通过 `breakpoint` 事件异步回报的 `verified`/`id` 只更新徽标，**不会增删**用户设置的断点。
 - **导航**：停止位置或选中的栈帧变化 → `openAndReveal` 打开源文件并滚动到该行（工作区外文件走只读外部标签，无法解析的合成路径静默忽略）；当前执行行本身由调试装饰层高亮（含 overview ruler 标记），因此关闭侧栏也仍然可见。
-- **启动顺序**：`initialize` → `setExceptionBreakpoints([])` → 写 `launch`/`attach`（后端在此立即返回，不等响应）→ 等适配器的 `initialized` 事件 → 逐文件 `setBreakpoints` → `configurationDone` → 程序才真正开始运行。这样「第 5 行的断点」在 `main` 执行前就已就位；而 `launch` 响应被推迟到首次停止（真实 `lldb-dap` 行为），因此不等它，否则会与尚未发送的 `configurationDone` 互相等待。
+- **启动顺序**：`initialize` → `setExceptionBreakpoints([])` → 发 DAP `launch`/`attach`（后端立即返回，不等响应）→ 等适配器的 `initialized` 事件 → 逐文件 `setBreakpoints` → `configurationDone`。带 `program` 的普通 launch 会先由后端在 Debug PTY 启动程序，再向适配器发送 `attach`，让程序 I/O 留在 PTY；显式 attach 或由适配器自行启动的配置则直接发送对应 DAP 请求。断点在 `configurationDone` 前设置；attach 目标可能已经运行。真实 `lldb-dap` 会推迟 launch 响应，因此启动路径不等待该响应。
 - **继续 / 单步**：发请求前**立即**清除当前行标记（适配器可能把 `continue` 的响应推迟到下一次停止），随后的 `stopped` 事件重新定位；`continued` 事件重复触发是幂等的。
 - **停止 / 重启**：`disconnect(terminateDebuggee: true)` 结束被调试进程并关闭 Debug 终端；重启是「停止后按同一语言重新启动」的编排，不是 DAP 请求。
 - **错误呈现**：适配器不可用、程序不存在、请求失败、适配器退出等都以 Toast 或侧栏状态行显示，且保留适配器原文（例如 `program not found: …`、未配置时提示 `debug.adapters.<languageId>`）。
@@ -451,8 +458,8 @@ Monaco 内置的 TS/JS worker 也提供补全/悬停/定义/大纲/诊断。为�
 ### 16.3 Debug Terminal
 
 - 启动调试时会自动展开终端面板并聚焦一个固定的 **Debug** 标签（前端 id 与 Rust `terminal::DEBUG_TERMINAL_ID` 同为 `1000000`）。
-- 它**不 spawn shell**：PTY 里跑的就是被调试进程——由适配器经 `runInTerminal` 反向请求（`args[0]` 即启动程序，如 `lldb-dap --comm-file …`）由后端 `terminal::spawn_program` 创建，因此程序的 stdin/stdout/stderr 就是这个 xterm，**交互式 `stdin`（`cin >> n`）可用**。
-- 数据通路：输出经 Tauri 事件 `debug-terminal-output`（空数据块 = `debug-terminal-exit`）；键盘输入走普通 `terminal_write`；尺寸走 `terminal_resize`；停止调试 / 会话结束 / 切工作区时关闭该 PTY（已打印的内容留在 xterm 缓冲区）。
+- 它**不 spawn shell**：PTY 里跑的就是被调试进程。带 `program` 的 launch 由后端直接创建 PTY 子进程并 attach 适配器；适配器也可通过 `runInTerminal` 反向请求启动程序。两条路径都让程序的 stdin/stdout/stderr 接入这个 xterm，**交互式 `stdin`（`cin >> n`）可用**。
+- 数据通路：输出经 Tauri 事件 `debug-terminal-output`（空数据块 = `debug-terminal-exit`）；键盘输入走普通 `terminal_write`；尺寸走 `terminal_resize`。每个新 Debug Session 开始时清空 xterm 当前 screen、scrollback 与该 session 的待消费输出；session 结束或停止时不清屏，保留本次最终输出供查看。PTY 在停止调试 / 会话结束 / 切工作区时关闭；旧 session 的迟到事件按 sessionId/owner 隔离。
 - 普通终端与任务终端仍各自 spawn shell，只有 Debug 终端是「程序即终端」。
 
 ### 16.4 状态与生命周期
