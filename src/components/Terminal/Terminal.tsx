@@ -433,9 +433,16 @@ interface TerminalPaneProps {
  * The debuggee's own terminal.
  *
  * Unlike the normal and task terminals, it does not spawn a shell: its pty is
- * the debuggee (created by the backend when lldb-dap sends `runInTerminal`), so
- * the program's stdin/stdout/stderr are this xterm. Output arrives as backend
- * events; input is forwarded with the ordinary `terminal_write`.
+ * the debuggee itself. The backend starts the program here when a session
+ * launches (and then attaches the debug adapter to that process), or when an
+ * adapter asks for a `runInTerminal` launch, so the program's
+ * stdin/stdout/stderr are this xterm. Output arrives as backend events; input is
+ * forwarded with the ordinary `terminal_write`.
+ *
+ * Keeping the program here rather than on the adapter's stdio is what makes
+ * interactive input work, and it also means the adapter's own output (the GDB
+ * banner, `[New Thread …]`, `attached to process …`) can never appear mixed in
+ * with the program's — that stays on the DAP output channel.
  *
  * The instance only exists once the Debug tab does (created on F5), and it stays
  * mounted while the panel is collapsed, so output is never dropped.
@@ -457,6 +464,7 @@ function DebugTerminalInstance({
     (s) => s.terminals.find((t) => t.kind === "debug")?.exited ?? false,
   );
   const debugSessionId = useTerminalStore((s) => s.debugSessionId);
+  const debugTerminalClearSeq = useTerminalStore((s) => s.debugTerminalClearSeq);
   const debugOutputRevision = useTerminalStore((s) => s.debugOutputRevision);
 
   useEffect(() => {
@@ -547,6 +555,11 @@ function DebugTerminalInstance({
       termRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (debugTerminalClearSeq === 0) return;
+    termRef.current?.reset();
+  }, [debugTerminalClearSeq]);
 
   useEffect(() => {
     if (debugSessionId === null || !termRef.current) return;

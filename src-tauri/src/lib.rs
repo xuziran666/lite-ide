@@ -11,7 +11,9 @@ mod session;
 mod shell;
 mod state;
 mod tasks;
-mod terminal;
+/// Public so the end-to-end test in `tests/` can spawn a real pty and attach a
+/// debug adapter to it, the same way `debug_start` does.
+pub mod terminal;
 mod watcher;
 
 use tauri::Manager;

@@ -10,7 +10,12 @@ use crate::config::{app_config_dir, UserConfig, UserConfigFile};
 /// `user.json` is the same file `crate::config::load`/`save` use; allowing it
 /// here is what lets the Debug settings section open the real global config in
 /// the editor instead of creating a second copy under the workspace.
-const GLOBAL_CONFIG_FILES: &[&str] = &["tasks.json", "user.json"];
+///
+/// `launch.json` is the global `launch.json` next to `user.json`: it says *how
+/// to start a program*, while `user.json`'s `debug.adapters` says *how to start
+/// the adapter*. It is read through this same command so there is exactly one
+/// place that knows the app config directory.
+const GLOBAL_CONFIG_FILES: &[&str] = &["tasks.json", "user.json", "launch.json"];
 
 fn global_file_path(app: &AppHandle, name: &str) -> Result<std::path::PathBuf, String> {
     let dir =
@@ -51,4 +56,24 @@ pub fn write_global_file(app: AppHandle, name: String, content: String) -> Resul
     fs::create_dir_all(dir)
         .map_err(|err| format!("Failed to create the config directory: {err}"))?;
     fs::write(&path, content).map_err(|err| format!("Failed to write the file: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GLOBAL_CONFIG_FILES;
+
+    /// The global `launch.json` is read through `read_global_file`, so the
+    /// allowlist has to name it — dropping it would make the whole global
+    /// launch-config feature fail with "Not a config file: launch.json".
+    #[test]
+    fn the_global_launch_file_is_allowed() {
+        for name in ["user.json", "tasks.json", "launch.json"] {
+            assert!(
+                GLOBAL_CONFIG_FILES.contains(&name),
+                "{name} must be readable and writable through the global-file commands"
+            );
+        }
+        // Still an allowlist, not a path: anything else is rejected.
+        assert!(!GLOBAL_CONFIG_FILES.contains(&".."));
+    }
 }

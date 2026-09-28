@@ -239,6 +239,13 @@ impl AppState {
     /// Called on explicit stop, on workspace change and on app exit. The
     /// shutdown is taken out of the lock first: it talks to the adapter over
     /// stdio and must never run while holding the state lock.
+    ///
+    /// The debuggee's pty is closed here too, and not only as a consequence of
+    /// the adapter exiting. The debuggee is a process *this* IDE started, and a
+    /// local adapter is not obliged to kill what it merely attached to — its
+    /// `terminateDebuggee` can be a no-op. Closing the pty is what ends it, and
+    /// doing it directly means a wedged adapter cannot leave a debuggee running
+    /// with its stdin open.
     pub fn stop_debug(&self) {
         let session = self
             .debug
@@ -248,6 +255,7 @@ impl AppState {
         if let Some(session) = session {
             session.shutdown();
         }
+        self.kill_debug_terminal();
     }
 
     /// Remember the id the debuggee's terminal pty is registered under.

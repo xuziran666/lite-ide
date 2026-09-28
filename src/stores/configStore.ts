@@ -25,6 +25,11 @@ import {
   DEFAULT_KEYBINDINGS,
   isDoubleCtrlChord,
 } from "../config/keybindings";
+import {
+  parseLaunchFile,
+  resolveAdapterArgv,
+  type DebugConfiguration,
+} from "../debug/launchConfig";
 import { useUiStore } from "./uiStore";
 
 const DEFAULT_EDITOR: EditorSettings = {
@@ -145,8 +150,18 @@ interface ConfigStore {
   configDir: string;
   settingsOpen: boolean;
   notice: string | null;
+  /**
+   * The global `launch.json`'s valid `configurations`, in file order. Empty
+   * when the file does not exist, which is what keeps the built-in per-language
+   * debug defaults in use.
+   */
+  launch: DebugConfiguration[];
+  /** First problem found in `launch.json`, shown to the user on the next F5. */
+  launchError: string | null;
 
   load: () => Promise<void>;
+  /** (Re)read the global `launch.json` from the app config directory. */
+  loadLaunch: () => Promise<void>;
   openSettings: () => void;
   closeSettings: () => void;
   updateEditor: (patch: Partial<EditorSettings>) => Promise<void>;
@@ -203,6 +218,8 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   configDir: "",
   settingsOpen: false,
   notice: null,
+  launch: [],
+  launchError: null,
 
   load: async () => {
     try {
@@ -237,6 +254,21 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
     } catch (err) {
       // The backend never fails for a readable config; keep defaults.
       useUiStore.getState().showToast(`加载配置失败: ${String(err)}`, "error");
+    }
+    // Awaited, not fired: the first F5 must already see the launch
+    // configurations, and a launch.json that cannot be read must not take the
+    // IDE down with it.
+    await get().loadLaunch();
+  },
+
+  loadLaunch: async () => {
+    try {
+      // `read_global_file` resolves null for a file that does not exist, which
+      // is the normal state and is why nothing is reported.
+      const file = parseLaunchFile(await readGlobalFile("launch.json"));
+      set({ launch: file.configurations, launchError: file.errors[0] ?? null });
+    } catch (err) {
+      set({ launch: [], launchError: String(err) });
     }
   },
 
@@ -349,17 +381,18 @@ export function lspCommandFor(language: string): string[] | undefined {
   return [entry.command, ...entry.args];
 }
 /**
- * The configured adapter argv for a language id, read from the live config.
+ * The argv of the debug adapter a `type` names, read from the live config.
  *
- * Unlike `lspCommandFor` there is deliberately **no** fallback: which debugger
- * drives which program is not a decision the app may make on the user's behalf,
- * so an unconfigured language yields `undefined` and the user gets told which
- * config key to add instead of a confusing "adapter not found".
+ * `type` is the adapter id from a `launch.json` configuration; the legacy path
+ * passes the language id, which is the same lookup. There is deliberately **no
+ * invented default**: which debugger drives which program is not a decision the
+ * app may make on the user's behalf, so an unknown `type` yields `undefined` and
+ * the caller reports which config key to add. A `type` that is only configured
+ * under its old key (`cpp-gdb` → `cpp`) is resolved by
+ * `resolveAdapterArgv`, so an existing `user.json` keeps working unchanged.
  */
-export function debugAdapterFor(language: string): string[] | undefined {
-  const entry = useConfigStore.getState().debug.adapters[language];
-  if (!entry || !entry.command) return undefined;
-  return [entry.command, ...entry.args];
+export function debugAdapterForType(type: string): string[] | undefined {
+  return resolveAdapterArgv(useConfigStore.getState().debug.adapters, type);
 }
 
 /** The user's launch arguments for a language, verbatim from `user.json`. */

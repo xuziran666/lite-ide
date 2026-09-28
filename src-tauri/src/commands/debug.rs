@@ -29,6 +29,30 @@ use crate::state::AppState;
 /// is `"launch"` or `"attach"` (absent means `"launch"`), and `launch` is the
 /// already-merged DAP arguments for that request.
 ///
+/// ## How a launched program actually starts
+///
+/// For an ordinary `launch` configuration the program is **not** started by the
+/// adapter. This command starts it itself, in the Debug Terminal pty, and then
+/// sends the adapter an `attach` for the pid it reported:
+///
+/// ```text
+/// Debug Terminal pty  <-->  debuggee   (stdin/stdout/stderr, the user's program)
+/// DAP                 <-->  adapter    (GDB/MI, never touches the program's I/O)
+/// ```
+///
+/// Two things fall out of that. The program gets a real terminal, which is the
+/// only way interactive input (`std::cin >> n`) works on Windows — a pipe
+/// cannot. And the adapter's chatter (the GDB banner, `[New Thread …]`,
+/// `attached to process`) stays on the DAP `output` channel instead of landing
+/// in the middle of the program's own output.
+///
+/// The user is not asked to change anything: their `program`, `args`, `cwd`,
+/// `env`, `console` and adapter-specific fields mean exactly what they did
+/// before. The fields describing *the program* now go to the pty spawn, and the
+/// rest still goes to the adapter untouched. A configuration with no `program`
+/// (attach-shaped, or one the adapter starts itself) keeps the old behaviour of
+/// handing the whole thing to the adapter.
+///
 /// This command deliberately does **not** wait for the program to stop, nor even
 /// for the `launch`/`attach` *response*. It returns as soon as that request has
 /// been written; everything after that is driven by the adapter's events, which
@@ -64,6 +88,10 @@ pub async fn debug_start(
             // one slipped in, that new one is left untouched.
             state.clear_debug_if_same(&existing);
             existing.shutdown();
+            // The old run's pty is ours to close: with the debuggee spawned here
+            // rather than by the adapter, `disconnect` alone would leave it
+            // running and holding its stdin open.
+            state.kill_debug_terminal_if_same(existing.id());
         }
 
         let request = match request.as_deref() {
@@ -88,10 +116,52 @@ pub async fn debug_start(
             session.abort();
             return Err(err);
         }
+
+        // Decide *before* starting anything, so a failure leaves nothing behind.
+        let debuggee = if request == "launch" {
+            debug::debuggee_spec(&arguments)
+        } else {
+            None
+        };
+
+        let (request_sent, request_arguments) = match &debuggee {
+            Some(spec) => {
+                // The adapter is already initialized at this point, so the only
+                // thing between the debuggee starting and the debugger reaching
+                // it is the `attach` round trip. Reversing these two steps would
+                // hand the program the adapter's whole start-up time to run in.
+                //
+                // A program that finishes in that window cannot be attached to at
+                // all (the adapter's "process not found" is the symptom); that is
+                // inherent to attaching to something already running, and is why
+                // this is spawned and attached in the same call rather than being
+                // left to the frontend.
+                let pid = session
+                    .spawn_debug_terminal(&spec.program, &spec.args, spec.cwd.clone(), &spec.env)
+                    .inspect_err(|_| {
+                        session.abort();
+                    })?;
+                // DAP does not standardize the name of the "attach to this pid"
+                // field, and GDB's own DAP server disagrees with everybody else
+                // (`pid`, and only as a number), so the adapter's command line
+                // decides which spelling is written here.
+                (
+                    "attach",
+                    spec.attach_arguments(pid, &arguments, debug::attach_pid_field(&argv)),
+                )
+            }
+            // No program to run in a terminal: the adapter starts it, exactly as
+            // before, with the configuration passed through untouched.
+            None => (request, arguments),
+        };
+
         // Fire and forget: the response only arrives once the debuggee first
         // stops, which can be never. See `DebugSession::send_request`.
-        if let Err(err) = session.send_request(request, arguments) {
+        if let Err(err) = session.send_request(request_sent, request_arguments) {
             session.abort();
+            if debuggee.is_some() {
+                state.kill_debug_terminal_if_same(session.id());
+            }
             return Err(err);
         }
 

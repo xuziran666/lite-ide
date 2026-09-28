@@ -159,9 +159,18 @@ impl DebugSession {
         if adapter.is_empty() {
             return Err("Debug Adapter 命令为空".to_string());
         }
-        let mut cmd = Command::new(&adapter[0]);
-        cmd.args(&adapter[1..])
-            .stdin(Stdio::piped())
+        let mut cmd = if crate::debug::needs_command_interpreter(&adapter[0]) {
+            // A `.cmd`/`.bat` shim, which `Command` cannot execute on its own.
+            let mut cmd = Command::new("cmd");
+            cmd.arg("/c").arg(&adapter[0]);
+            cmd.args(&adapter[1..]);
+            cmd
+        } else {
+            let mut cmd = Command::new(&adapter[0]);
+            cmd.args(&adapter[1..]);
+            cmd
+        };
+        cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(windows)]
@@ -270,15 +279,26 @@ impl DebugSession {
             .clone()
     }
 
-    /// Run the adapter's `runInTerminal` program in a pty and return the DAP
-    /// response body (`processId`).
+    /// Run a program in the Debug Terminal pty and return the pty child's own
+    /// process id.
     ///
-    /// The program is lldb-dap's own launcher, not the debuggee directly: it
-    /// starts the target on the pty and coordinates with the main adapter through
-    /// a communication file. Giving it a real tty is what makes interactive
-    /// stdin (`cin >> n`) work, which piped stdio cannot.
-    fn run_in_terminal(&self, arguments: &Value) -> Result<Value, String> {
-        let spec = crate::debug::parse_run_in_terminal(arguments)?;
+    /// This is the one place a debuggee's `stdin`/`stdout`/`stderr` are created.
+    /// It is deliberately *not* wired to the adapter's stdio: the adapter talks
+    /// DAP/GDB-MI over its own pipes, so nothing the program prints can be
+    /// mistaken for debugger output, and nothing the adapter writes can end up
+    /// on the program's stdin. That separation is what makes interactive input
+    /// (`std::cin >> n`) work at all.
+    ///
+    /// Both ways of getting a debuggee into a terminal go through here: an
+    /// adapter that asks us to via `runInTerminal`, and the launch path that
+    /// spawns the program itself and attaches the adapter to its pid.
+    pub fn spawn_debug_terminal(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: Option<std::path::PathBuf>,
+        env: &[(String, String)],
+    ) -> Result<u32, String> {
         let id = crate::terminal::DEBUG_TERMINAL_ID;
         let session_id = self.session_id;
         let sink: crate::terminal::OutputSink = if let Some(app) = self.app.clone() {
@@ -305,14 +325,15 @@ impl DebugSession {
             })
         };
 
-        let terminal = crate::terminal::TerminalSession::spawn_program(
-            &spec.program,
-            &spec.args,
-            spec.cwd,
-            &spec.env,
-            sink,
-        )?;
-        let pid = terminal.process_id().unwrap_or(0);
+        let terminal =
+            crate::terminal::TerminalSession::spawn_program(program, args, cwd, env, sink)?;
+        // The pty child's own pid, read from the child handle. Attaching to this
+        // exact process is what makes the split work, so a missing id is an
+        // error rather than a silent 0 — the adapter would refuse it anyway,
+        // with a far less obvious message.
+        let pid = terminal.process_id().ok_or_else(|| {
+            format!("无法获取被调试进程的 pid: {program}")
+        })?;
 
         if let Some(app) = self.app.as_ref() {
             if let Some(state) = app.try_state::<crate::state::AppState>() {
@@ -331,6 +352,20 @@ impl DebugSession {
             *guard = Some(terminal);
         }
 
+        Ok(pid)
+    }
+
+    /// Run the adapter's `runInTerminal` program in a pty and return the DAP
+    /// response body (`processId`).
+    ///
+    /// The program is lldb-dap's own launcher, not the debuggee directly: it
+    /// starts the target on the pty and coordinates with the main adapter through
+    /// a communication file. Giving it a real tty is what makes interactive
+    /// stdin (`cin >> n`) work, which piped stdio cannot.
+    fn run_in_terminal(&self, arguments: &Value) -> Result<Value, String> {
+        let spec = crate::debug::parse_run_in_terminal(arguments)?;
+        let pid =
+            self.spawn_debug_terminal(&spec.program, &spec.args, spec.cwd, &spec.env)?;
         Ok(json!({ "processId": pid, "shellProcessId": pid }))
     }
 
@@ -508,7 +543,7 @@ impl DebugSession {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
         if let Some(mut child) = child {
-            let _ = child.kill();
+            kill_process_tree(&mut child);
             let _ = child.wait();
         }
     }
@@ -601,6 +636,25 @@ fn reader_loop(session: Arc<DebugSession>, stdout: ChildStdout) {
             }
         }
     }
+}
+
+/// Kill a child process, and on Windows everything it started.
+///
+/// A bare adapter executable is its own whole process tree, but an adapter
+/// reached through a `.cmd`/`.bat` shim runs as `cmd -> node -> …`, and killing
+/// `cmd` alone leaves the real adapter running with our DAP pipe in its stdin.
+/// `taskkill /T` closes the tree in one go, so a wedged or crashed adapter never
+/// survives as an orphan.
+fn kill_process_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output();
+    }
+    let _ = child.kill();
 }
 
 /// Remove the session from `AppState`, but only if it is still the current one.

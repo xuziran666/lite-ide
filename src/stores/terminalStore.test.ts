@@ -52,6 +52,27 @@ state = useTerminalStore.getState();
 equal(state.terminals.find((terminal) => terminal.id === DEBUG_TERMINAL_ID)?.dock, "right", "debug reveal does not move the session back to bottom");
 equal(state.activeIdByDock.right, DEBUG_TERMINAL_ID, "debug reveal selects the debug session in its current dock");
 
+console.log("Debug terminal output follows the current session owner");
+store.setDebugSessionId(1);
+store.appendDebugOutput(1, new TextEncoder().encode("session A output\n"));
+store.markDebugTerminalExited(1, DEBUG_TERMINAL_ID);
+state = useTerminalStore.getState();
+equal(state.terminals.find((terminal) => terminal.id === DEBUG_TERMINAL_ID)?.exited, true, "session A exit is applied to its terminal");
+equal(new TextDecoder().decode(store.consumeDebugOutput(1)), "session A output\n", "session A output remains available after exit");
+
+store.beginDebugSession();
+state = useTerminalStore.getState();
+equal(state.debugSessionId, null, "new session start releases the previous output owner");
+equal(state.debugTerminalClearSeq, 1, "new session start requests an xterm screen and scrollback reset");
+equal(store.consumeDebugOutput(1).length, 0, "new session start clears pending output from session A");
+store.setDebugSessionId(2);
+store.appendDebugOutput(2, new TextEncoder().encode("session B output\n"));
+store.markRunning(DEBUG_TERMINAL_ID);
+store.markDebugTerminalExited(1, DEBUG_TERMINAL_ID);
+state = useTerminalStore.getState();
+equal(state.terminals.find((terminal) => terminal.id === DEBUG_TERMINAL_ID)?.exited, false, "late session A exit cannot mark session B exited");
+equal(new TextDecoder().decode(store.consumeDebugOutput(2)), "session B output\n", "late session A exit cannot clear session B output");
+
 store.reset();
 if (failures > 0) {
   throw new Error(`${failures} terminal store tests failed`);

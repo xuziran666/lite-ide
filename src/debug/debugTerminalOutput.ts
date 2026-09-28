@@ -35,4 +35,8 @@ export class DebugOutputBuffer {
   clear(sessionId: number): void {
     this.chunks.delete(sessionId);
   }
+
+  clearAll(): void {
+    this.chunks.clear();
+  }
 }

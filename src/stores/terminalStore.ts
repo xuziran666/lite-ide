@@ -34,6 +34,7 @@ interface TerminalStore {
    *  can expand the panel and focus it without the store owning UI state. */
   revealSeq: number;
   debugSessionId: number | null;
+  debugTerminalClearSeq: number;
   debugOutputRevision: number;
   debugOutput: DebugOutputBuffer;
   create: (kind?: "normal" | "task", dock?: TerminalDock) => number;
@@ -43,6 +44,8 @@ interface TerminalStore {
   markExited: (id: number) => void;
   markRunning: (id: number) => void;
   setDebugSessionId: (sessionId: number | null) => void;
+  beginDebugSession: () => void;
+  markDebugTerminalExited: (sessionId: number, terminalId: number) => void;
   appendDebugOutput: (sessionId: number, data: Uint8Array) => void;
   consumeDebugOutput: (sessionId: number) => Uint8Array;
   clearDebugOutput: (sessionId: number) => void;
@@ -57,6 +60,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
   nextId: 1,
   revealSeq: 0,
   debugSessionId: null,
+  debugTerminalClearSeq: 0,
   debugOutputRevision: 0,
   debugOutput: new DebugOutputBuffer(),
 
@@ -159,6 +163,22 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
 
   setDebugSessionId: (debugSessionId) => set({ debugSessionId }),
 
+  beginDebugSession: () => {
+    set((state) => {
+      state.debugOutput.clearAll();
+      return {
+        debugSessionId: null,
+        debugTerminalClearSeq: state.debugTerminalClearSeq + 1,
+        debugOutputRevision: state.debugOutputRevision + 1,
+      };
+    });
+  },
+
+  markDebugTerminalExited: (sessionId, terminalId) => {
+    if (get().debugSessionId !== sessionId) return;
+    get().markExited(terminalId);
+  },
+
   appendDebugOutput: (sessionId, data) => {
     set((state) => {
       state.debugOutput.append(sessionId, data);
@@ -213,6 +233,7 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       nextId: 1,
       revealSeq: 0,
       debugSessionId: null,
+      debugTerminalClearSeq: 0,
       debugOutputRevision: 0,
       debugOutput: new DebugOutputBuffer(),
     });

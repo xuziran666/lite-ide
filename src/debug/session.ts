@@ -1,13 +1,18 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { debugRequest, debugStart, debugStop } from "../commands";
-import { debugAdapterFor, debugLaunchFor } from "../stores/configStore";
+import { debugAdapterForType, debugLaunchFor, useConfigStore } from "../stores/configStore";
 import { useDebugStore } from "../stores/debugStore";
 import { useUiStore } from "../stores/uiStore";
 import { useWorkspaceStore } from "../stores/workspaceStore";
 import { useEditorStore } from "../stores/editorStore";
 import { asNumber, asRecord, asString, sourcePath } from "./protocol";
 import type { DapScope } from "./protocol";
-import { buildLaunchArguments, requestKindOf } from "./launchConfig";
+import {
+  buildLaunchArguments,
+  requestKindOf,
+  selectLaunchConfiguration,
+  toLaunchArguments,
+} from "./launchConfig";
 import type { DebugRequestKind } from "./launchConfig";
 import { useTerminalStore } from "../stores/terminalStore";
 import type {
@@ -121,9 +126,9 @@ export function ensureDebugSubscriptions(): Promise<void> {
         // Tauri event delivery can still let the exit event reach this
         // listener before React mounts the terminal.
         staleSessionIds.add(payload.sessionId);
-        if (payload.sessionId === activeSessionId) {
-          useTerminalStore.getState().markExited(payload.id);
-        }
+        useTerminalStore
+          .getState()
+          .markDebugTerminalExited(payload.sessionId, payload.id);
       });
       unlistenExited = await listen<{ message: string }>(
         "debug-exited",
@@ -447,7 +452,8 @@ function activeTab() {
   return openFiles.find((tab) => tab.path === activePath);
 }
 
-/** The language id of the active file, used to pick the adapter. */
+/** The language id of the active file: the fallback adapter key, and the
+ * `program` default key when there is no `launch.json` configuration. */
 function activeLanguage(): string | undefined {
   return activeTab()?.language;
 }
@@ -455,12 +461,14 @@ function activeLanguage(): string | undefined {
 /**
  * Start debugging the active file's language.
  *
- * The adapter and arguments come from `user.json`; the only thing decided in code
- * is the `program` default for languages that have one. Which of `launch` /
- * `attach` is sent comes from the config's `request` field (VS Code-style),
- * unless `override` forces one. A missing adapter is reported with the exact
- * config key to add, because that is the one failure every user hits first and
- * the least guessable from the message alone.
+ * The launch configuration comes from the global `launch.json` when it has one
+ * (its `type` then names the adapter, and its fields become the DAP `launch`
+ * arguments); otherwise from `user.json`'s `debug.launch.<language>`, with the
+ * built-in `program` default for languages that have one. Which of `launch` /
+ * `attach` is sent comes from the configuration's `request` field
+ * (VS Code-style), unless `override` forces one. A missing adapter is reported
+ * with the exact config key to add, because that is the one failure every user
+ * hits first and the least guessable from the message alone.
  */
 export async function startDebugging(
   language: string | undefined = activeLanguage(),
@@ -480,27 +488,47 @@ export async function startDebugging(
     return;
   }
 
-  const configured = debugLaunchFor(language);
+  // The global `launch.json` wins when it has a usable configuration; with none
+  // (no file, or every entry rejected) the language-keyed path below runs
+  // exactly as it did before, so an old project keeps debugging.
+  const { launch: launchConfigurations, launchError } = useConfigStore.getState();
+  const config = selectLaunchConfiguration(launchConfigurations, (type) =>
+    debugAdapterForType(type) !== undefined,
+  );
+  if (launchError) {
+    // Only claim a fallback when there really is one: a file with one bad entry
+    // and one good one still runs the good one.
+    useUiStore
+      .getState()
+      .showToast(
+        config ? launchError : `${launchError}（已改用默认调试配置）`,
+        "error",
+      );
+  }
+  // The adapter id: the configuration's `type`, or the language id of the
+  // legacy path. It selects `debug.adapters.<id>` and is announced to the
+  // adapter as `initialize.arguments.adapterID`.
+  const type = config?.type ?? language;
+  const configured = config ? toLaunchArguments(config) : debugLaunchFor(language);
   const request: DebugRequestKind = override ?? requestKindOf(configured);
   dispatch({ kind: "startRequested", language });
   if (activeSessionId !== null) {
     staleSessionIds.add(activeSessionId);
-    useTerminalStore.getState().clearDebugOutput(activeSessionId);
   }
   activeSessionId = null;
-  useTerminalStore.getState().setDebugSessionId(null);
+  useTerminalStore.getState().beginDebugSession();
   queuedEvents = [];
   await ensureDebugSubscriptions();
 
-  const adapter = debugAdapterFor(language);
+  const adapter = debugAdapterForType(type);
   if (!adapter) {
     dispatch({
       kind: "startFailed",
-      error: `未配置调试器，请在 user.json 中添加 debug.adapters.${language}`,
+      error: `未配置调试器，请在 user.json 中添加 debug.adapters.${type}`,
     });
     useUiStore
       .getState()
-      .showToast(`未配置 ${language} 的调试适配器`, "error");
+      .showToast(`未配置 ${type} 的调试适配器`, "error");
     return;
   }
 
@@ -514,7 +542,7 @@ export async function startDebugging(
   });
 
   try {
-    const result = await debugStart(language, adapter, launch, request);
+    const result = await debugStart(type, adapter, launch, request);
     activeSessionId = result.sessionId;
     staleSessionIds.delete(result.sessionId);
     useTerminalStore.getState().setDebugSessionId(result.sessionId);
@@ -613,10 +641,8 @@ export async function stopSession(): Promise<void> {
   }
   if (activeSessionId !== null) {
     staleSessionIds.add(activeSessionId);
-    useTerminalStore.getState().clearDebugOutput(activeSessionId);
   }
   activeSessionId = null;
-  useTerminalStore.getState().setDebugSessionId(null);
   queuedEvents = [];
   dispatch({ kind: "reset" });
 }
